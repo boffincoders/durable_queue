@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import '../retry/retry_policy.dart';
 import 'task_failure.dart';
 import 'task_status.dart';
@@ -28,7 +30,7 @@ final class StoredTask {
     this.idempotencyKey,
     this.lastFailure,
     this.cancelRequested = false,
-  }) : payload = Map<String, dynamic>.unmodifiable(payload) {
+  }) : payload = _freezeMap(payload) {
     if (id.isEmpty) {
       throw ArgumentError.value(id, 'id', 'Must not be empty');
     }
@@ -49,7 +51,8 @@ final class StoredTask {
   /// Registry key. Matches `DurableTask.type`.
   final String type;
 
-  /// JSON payload produced by `DurableTask.toJson`.
+  /// Deeply immutable JSON snapshot produced by `DurableTask.toJson`.
+  /// Nested lists and maps cannot be modified through this record.
   final Map<String, dynamic> payload;
 
   /// Current lifecycle state.
@@ -249,4 +252,25 @@ Map<String, dynamic> _requireMap(Map<String, dynamic> json, String key) {
 Map<String, dynamic> _requireObject(Object? value, String key) {
   if (value is Map) return Map<String, dynamic>.from(value);
   throw FormatException('StoredTask.$key must be an object');
+}
+
+// Snapshot every container: records must not share mutable nested values with
+// callers, decoders, or previous attempts.
+Map<String, dynamic> _freezeMap(Map<String, dynamic> value) =>
+    value is _FrozenPayload
+    ? value
+    : _FrozenPayload(
+        value.map((key, value) => MapEntry(key, _freezeValue(value))),
+      );
+
+Object? _freezeValue(Object? value) {
+  if (value is Map) return _freezeMap(Map<String, dynamic>.from(value));
+  if (value is List) return List<Object?>.unmodifiable(value.map(_freezeValue));
+  return value;
+}
+
+// This marker lets copyWith share an already immutable payload without copying
+// a potentially large task on every lifecycle transition.
+final class _FrozenPayload extends UnmodifiableMapView<String, dynamic> {
+  _FrozenPayload(super.map);
 }

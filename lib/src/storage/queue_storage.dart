@@ -34,7 +34,27 @@ abstract interface class QueueStorage {
   Future<List<StoredTask>> getPending();
 
   /// Returns tasks whose status is [status], oldest first.
-  Future<List<StoredTask>> getByStatus(TaskStatus status);
+  ///
+  /// [limit], when supplied, must be positive and bounds the returned records.
+  /// Recovery repeatedly requests bounded batches of running tasks.
+  Future<List<StoredTask>> getByStatus(TaskStatus status, {int? limit});
+
+  /// Returns the oldest eligible pending or retry-scheduled task, or null.
+  ///
+  /// Eligible means `nextAttemptAt` is null or at/before [now]. Order by
+  /// createdAt, sequence, then id across both statuses. This is a bounded
+  /// query: adapters should use indexes, not materialize the entire backlog.
+  Future<StoredTask?> getNextReady(DateTime now);
+
+  /// Earliest non-null nextAttemptAt among pending and retry-scheduled tasks.
+  ///
+  /// Return overdue timestamps too. Return null if no timed work exists.
+  Future<DateTime?> getNextWakeAt();
+
+  /// Largest sequence currently stored, or zero for empty storage.
+  ///
+  /// Implement with an aggregate/index rather than loading all records.
+  Future<int> getMaxSequence();
 
   /// Returns every stored task, oldest first.
   Future<List<StoredTask>> getAll();

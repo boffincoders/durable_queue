@@ -71,3 +71,33 @@ final class TaskInterruptedException implements Exception {
   String toString() =>
       'TaskInterruptedException: task was still running when the queue restarted';
 }
+
+/// A worker storage operation failed and will be retried.
+///
+/// Delivered as a value on `DurableQueue.storageErrors`. The original error is
+/// available to the application; it is not persisted as a task failure.
+final class QueueStorageFailure {
+  /// Creates a diagnostic for a failed storage call.
+  const QueueStorageFailure({
+    required this.operation,
+    required this.error,
+    required this.stackTrace,
+    required this.occurredAt,
+    required this.attempt,
+  });
+
+  /// Storage method that threw.
+  final String operation;
+
+  /// Original storage error.
+  final Object error;
+
+  /// Stack trace from the storage failure.
+  final StackTrace stackTrace;
+
+  /// Time of the failure according to the queue clock.
+  final DateTime occurredAt;
+
+  /// Number of consecutive failures for this particular operation.
+  final int attempt;
+}

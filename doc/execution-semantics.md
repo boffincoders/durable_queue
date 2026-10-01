@@ -22,10 +22,12 @@ Use an idempotent handler, or pass `idempotencyKey` and send that key to the ext
 
 ```text
 pending → running → completed
-                 ↘ retryScheduled → pending → running
+                 ↘ retryScheduled → running
                  ↘ failed
 pending or retryScheduled → cancelled
 ```
+
+Due retries are claimed directly from `retryScheduled`; they are not all rewritten as pending when their deadline passes.
 
 `attempts` is the number of attempts that have started. The attempt is incremented when a task moves to `running`, before the handler returns.
 
@@ -71,7 +73,7 @@ When `deduplicationKey` is set, `enqueue` returns the existing id and does not c
 
 | Method | Effect |
 |---|---|
-| `start` | Allowed from `idle`. Recovers `running` tasks, then starts eligible work. |
+| `start` | Allowed from `idle`. Recovers `running` tasks in bounded batches, then starts eligible work. Failed recovery leaves the queue idle and can be retried. |
 | `pause` | Allowed from `running`. In-flight handlers finish. Nothing new starts, including due retries. |
 | `resume` | Allowed from `paused`. Continues starting work. |
 | `stop` | From `running` or `paused`, waits for in-flight handlers and returns to `idle`. Other tasks stay stored. `stop` on `idle` does nothing. `stop` does not finish if a handler never returns. |
@@ -85,6 +87,10 @@ Eligible tasks start oldest `createdAt` first, then by enqueue `sequence`, then 
 ## Errors
 
 Handler exceptions are caught per task. One failure does not stop the worker. The latest failure is stored as text on the task. Do not put secrets in exception messages or task payloads.
+
+Storage failures are separate from handler failures. Worker storage operations retry after `storageRetryDelay` (one second by default), and publish diagnostics as values on `queue.storageErrors`. A failed result write retains the handler outcome and execution slot; retries repeat only the storage operation. They do not consume handler attempts. Storage retries keep the serialized lock, so an outage can delay controls, queries, cancellation, and enqueue until storage recovers. `stop()` also waits for outstanding persistence. Public API storage calls and startup recovery propagate errors to the caller. See [storage contract](storage.md) for details.
+
+Stored payloads are deeply immutable snapshots. Each decoder receives an independent mutable JSON copy, so changes made by a handler cannot alter later attempts or query results.
 
 ## Clock
 

@@ -141,6 +141,8 @@ final failed = await queue.getTasks(status: TaskStatus.failed);
 
 The event stream is broadcast and does not replay events that happened before the listener subscribed.
 
+Worker storage errors are reported as values on `queue.storageErrors` and retried after `storageRetryDelay` (default one second). A failed result write retries persistence without running the handler again. Storage outages hold serialized operations, so enqueue, queries, cancellation, pause, and stop can wait until storage recovers. Failed startup recovery leaves the queue idle and allows another `start()` call.
+
 ## Guarantees
 
 Execution is **at least once**. A crash after a side effect but before the completion write can run the task again.

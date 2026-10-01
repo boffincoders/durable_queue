@@ -132,4 +132,64 @@ void queueStorageContractTests(QueueStorage Function() create) {
 
     expect(await storage.getAll(), hasLength(20));
   });
+
+  test(
+    'bounded queries merge due retries and pending work in enqueue order',
+    () async {
+      final now = DateTime.utc(2026);
+      await storage.save(
+        storedTask(
+          id: 'future',
+          sequence: 0,
+          status: TaskStatus.retryScheduled,
+          nextAttemptAt: now.add(const Duration(seconds: 1)),
+        ),
+      );
+      await storage.save(
+        storedTask(
+          id: 'retry',
+          sequence: 1,
+          status: TaskStatus.retryScheduled,
+          nextAttemptAt: now,
+        ),
+      );
+      await storage.save(storedTask(id: 'pending', sequence: 2));
+      expect((await storage.getNextReady(now))?.id, 'retry');
+      expect(await storage.getNextWakeAt(), now);
+      expect(await storage.getMaxSequence(), 2);
+      expect(
+        (await storage.getByStatus(
+          TaskStatus.retryScheduled,
+          limit: 1,
+        )).single.id,
+        'future',
+      );
+      expect(
+        storage.getByStatus(TaskStatus.pending, limit: 0),
+        throwsArgumentError,
+      );
+      await storage.update(
+        (await storage.get('retry'))!.copyWith(status: TaskStatus.completed),
+      );
+      expect((await storage.getNextReady(now))?.id, 'pending');
+      expect(
+        await storage.getNextWakeAt(),
+        now.add(const Duration(seconds: 1)),
+      );
+      await storage.delete('pending');
+      expect(await storage.getNextReady(now), isNull);
+      expect(await storage.getMaxSequence(), 1);
+      expect(
+        (await storage.getNextReady(now.add(const Duration(seconds: 1))))?.id,
+        'future',
+      );
+    },
+  );
+
+  test('empty bounded queries return null or zero', () async {
+    expect(await storage.getNextReady(DateTime.utc(2026)), isNull);
+    expect(await storage.getNextWakeAt(), isNull);
+    expect(await storage.getMaxSequence(), 0);
+    expect(await storage.getByStatus(TaskStatus.running, limit: 10), isEmpty);
+  });
 }

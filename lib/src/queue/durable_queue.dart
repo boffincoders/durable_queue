@@ -75,17 +75,26 @@ final class DurableQueue {
   /// [maxConcurrentTasks] must be at least 1. [clock] defaults to the system
   /// clock. [randomFraction] must return values in `[0, 1)` and is used only
   /// when a retry policy enables jitter. [idGenerator] defaults to a random
-  /// UUID v4 string.
+  /// UUID v4 string. [storageRetryDelay] must be positive and defaults to one
+  /// second; worker storage errors are reported through [storageErrors].
   DurableQueue({
     required QueueStorage storage,
     QueueClock? clock,
     this.maxConcurrentTasks = 1,
+    this.storageRetryDelay = const Duration(seconds: 1),
     RandomFraction? randomFraction,
     TaskIdGenerator? idGenerator,
   }) : _storage = storage,
        _clock = clock ?? const SystemQueueClock(),
        _randomFraction = randomFraction ?? Random().nextDouble,
        _idGenerator = idGenerator ?? _defaultTaskId {
+    if (storageRetryDelay <= Duration.zero) {
+      throw ArgumentError.value(
+        storageRetryDelay,
+        'storageRetryDelay',
+        'Must be positive',
+      );
+    }
     if (maxConcurrentTasks < 1) {
       throw ArgumentError.value(
         maxConcurrentTasks,
@@ -105,10 +114,18 @@ final class DurableQueue {
   /// Maximum number of handlers running at once.
   final int maxConcurrentTasks;
 
+  /// Delay between retries of worker storage operations that throw.
+  ///
+  /// The worker retains its outcome and slot until the write succeeds. Public
+  /// calls and startup recovery report storage errors to their caller instead.
+  final Duration storageRetryDelay;
+
   final TaskRegistry _registry = TaskRegistry();
   final AsyncLock _lock = AsyncLock();
   final StreamController<QueueEvent> _events =
       StreamController<QueueEvent>.broadcast();
+  final StreamController<QueueStorageFailure> _storageErrors =
+      StreamController<QueueStorageFailure>.broadcast();
   final Set<String> _cancelRequested = {};
 
   QueueRunState _runState = QueueRunState.idle;
@@ -126,6 +143,13 @@ final class DurableQueue {
 
   /// Lifecycle events. This is a broadcast stream and does not replay.
   Stream<QueueEvent> get events => _events.stream;
+
+  /// Worker storage failures, reported before each automatic retry.
+  ///
+  /// A broadcast stream of values, not uncaught stream errors. Subscribe before
+  /// starting the worker. An outage holds serialized storage operations and
+  /// may delay pause, stop, enqueue, cancellation, and queries until recovery.
+  Stream<QueueStorageFailure> get storageErrors => _storageErrors.stream;
 
   /// Registers the handler for [type].
   ///
@@ -237,24 +261,30 @@ final class DurableQueue {
   /// cancellation was already requested is marked cancelled and is not
   /// retried.
   ///
+  /// Recovery errors propagate and leave the queue idle so this call can be
+  /// retried. Successfully recovered records stay updated.
+  ///
   /// Throws [StateError] unless the queue is [QueueRunState.idle].
   Future<void> start() async {
-    final recovered = await _lock.synchronized(() async {
+    await _lock.synchronized(() async {
       if (_runState != QueueRunState.idle) {
         throw StateError('Cannot start a queue from $_runState');
       }
-      _runState = QueueRunState.running;
-      final running = await _storage.getByStatus(TaskStatus.running);
-      final events = <QueueEvent>[];
-      for (final task in running) {
-        final event = await _recoverInterrupted(task);
-        if (event != null) events.add(event);
+      // Recovery is serialized while still idle. No timers or handlers start
+      // until every batch succeeds; a failure leaves start safe to retry.
+      while (true) {
+        final running = await _storage.getByStatus(
+          TaskStatus.running,
+          limit: 100,
+        );
+        if (running.isEmpty) break;
+        for (final task in running) {
+          final event = await _recoverInterrupted(task);
+          if (event != null) _emit(event);
+        }
       }
-      return events;
+      _runState = QueueRunState.running;
     });
-    for (final event in recovered) {
-      _emit(event);
-    }
     await _pump();
   }
 
@@ -289,6 +319,8 @@ final class DurableQueue {
   ///
   /// Pending and retry-scheduled tasks remain stored. Calling [stop] on an
   /// idle queue does nothing. [start] may be called again afterwards.
+  /// Outstanding worker storage retries must also finish; an unavailable
+  /// adapter can keep this future pending until storage recovers.
   Future<void> stop() async {
     final shouldWait = await _lock.synchronized(() async {
       switch (_runState) {
@@ -349,12 +381,12 @@ final class DurableQueue {
             wasRunning: false,
           );
         case TaskStatus.running:
-          _cancelRequested.add(task.id);
           if (!task.cancelRequested) {
             await _storage.update(
               task.copyWith(cancelRequested: true, updatedAt: now),
             );
           }
+          _cancelRequested.add(task.id);
           return null;
         case TaskStatus.completed:
         case TaskStatus.failed:
@@ -482,47 +514,35 @@ final class DurableQueue {
 
   Future<StoredTask?> _claimNext() async {
     if (_runState != QueueRunState.running) return null;
-    final now = _clock.now();
-    final scheduled = await _storage.getByStatus(TaskStatus.retryScheduled);
-    for (final task in scheduled) {
-      final at = task.nextAttemptAt;
-      if (at != null && now.isBefore(at)) continue;
-      await _storage.update(
-        task.copyWith(
-          status: TaskStatus.pending,
-          updatedAt: now,
-          nextAttemptAt: null,
-        ),
-      );
-    }
-
-    final pending = [...await _storage.getByStatus(TaskStatus.pending)]
-      ..sort(compareStoredTasks);
-    for (final task in pending) {
-      final at = task.nextAttemptAt;
-      if (at != null && now.isBefore(at)) continue;
-      final claimed = task.copyWith(
-        status: TaskStatus.running,
-        attempts: task.attempts + 1,
-        updatedAt: _clock.now(),
-        nextAttemptAt: null,
-      );
-      await _storage.update(claimed);
-      return claimed;
-    }
-    return null;
+    final task = await _retryStorage(
+      () => _storage.getNextReady(_clock.now()),
+      'getNextReady',
+    );
+    if (task == null) return null;
+    // Claim only one due retry rather than promoting the whole backlog.
+    final claimed = task.copyWith(
+      status: TaskStatus.running,
+      attempts: task.attempts + 1,
+      updatedAt: _clock.now(),
+      nextAttemptAt: null,
+    );
+    await _retryStorage(() => _storage.update(claimed), 'update');
+    return claimed;
   }
 
   Future<void> _revertClaim(StoredTask claimed) async {
-    final current = await _storage.get(claimed.id);
+    final current = await _retryStorage(() => _storage.get(claimed.id), 'get');
     if (current == null || current.status != TaskStatus.running) return;
     if (current.attempts != claimed.attempts) return;
-    await _storage.update(
-      current.copyWith(
-        status: TaskStatus.pending,
-        attempts: current.attempts - 1,
-        updatedAt: _clock.now(),
+    await _retryStorage(
+      () => _storage.update(
+        current.copyWith(
+          status: TaskStatus.pending,
+          attempts: current.attempts - 1,
+          updatedAt: _clock.now(),
+        ),
       ),
+      'update',
     );
   }
 
@@ -559,7 +579,7 @@ final class DurableQueue {
 
     final DurableTask decoded;
     try {
-      decoded = registration.decode(Map<String, dynamic>.from(claimed.payload));
+      decoded = registration.decode(_jsonPayload(claimed.payload));
       if (decoded.type != claimed.type) {
         throw TaskDecodeException(
           'Decoded task type "${decoded.type}" does not match stored type '
@@ -770,7 +790,7 @@ final class DurableQueue {
     )
     change,
   ) async {
-    final current = await _storage.get(claimed.id);
+    final current = await _retryStorage(() => _storage.get(claimed.id), 'get');
     if (current == null || current.status != TaskStatus.running) return null;
     final now = _clock.now();
     TaskFailure failureOf(Object error, StackTrace stackTrace) {
@@ -778,7 +798,7 @@ final class DurableQueue {
     }
 
     final transition = change(current, now, failureOf);
-    await _storage.update(transition.task);
+    await _retryStorage(() => _storage.update(transition.task), 'update');
     _cancelRequested.remove(current.id);
     return transition.event;
   }
@@ -816,18 +836,13 @@ final class DurableQueue {
     if (_inFlight >= maxConcurrentTasks) return;
     final earliest = await _lock.synchronized(() async {
       if (_runState != QueueRunState.running) return null;
-      DateTime? earliest;
-      final scheduled = await _storage.getByStatus(TaskStatus.retryScheduled);
-      for (final task in scheduled) {
-        final at = task.nextAttemptAt;
-        if (at == null) continue;
-        if (earliest == null || at.isBefore(earliest)) earliest = at;
-      }
-      return earliest;
+      return await _retryStorage(
+        () => _storage.getNextWakeAt(),
+        'getNextWakeAt',
+      );
     });
     if (earliest == null || _runState != QueueRunState.running) return;
     if (_inFlight >= maxConcurrentTasks) return;
-    if (!_clock.now().isBefore(earliest)) return;
     _considerWake(earliest);
   }
 
@@ -875,6 +890,31 @@ final class DurableQueue {
     return (_drain ??= Completer<void>()).future;
   }
 
+  Future<T> _retryStorage<T>(
+    Future<T> Function() operation,
+    String name,
+  ) async {
+    var attempt = 0;
+    while (true) {
+      try {
+        return await operation();
+      } on Object catch (error, stackTrace) {
+        _storageErrors.add(
+          QueueStorageFailure(
+            operation: name,
+            error: error,
+            stackTrace: stackTrace,
+            occurredAt: _clock.now(),
+            attempt: ++attempt,
+          ),
+        );
+        // This is storage recovery, not a handler retry. It neither consumes
+        // task attempts nor re-invokes business logic.
+        await _clock.delayUntil(_clock.now().add(storageRetryDelay)).future;
+      }
+    }
+  }
+
   double _nextFraction() {
     final value = _randomFraction();
     if (value.isNaN || value < 0 || value >= 1) {
@@ -890,14 +930,7 @@ final class DurableQueue {
   }
 
   Future<int> _allocateSequence() async {
-    final current = _sequence;
-    if (current == null) {
-      var maxSeen = 0;
-      for (final task in await _storage.getAll()) {
-        if (task.sequence > maxSeen) maxSeen = task.sequence;
-      }
-      _sequence = maxSeen;
-    }
+    _sequence ??= await _storage.getMaxSequence();
     final next = _sequence! + 1;
     _sequence = next;
     return next;
