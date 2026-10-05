@@ -107,7 +107,10 @@ void main() {
       expect(second, isNot(first));
 
       await expectLater(harness.queue.retry(first), throwsStateError);
-      expect((await harness.queue.getTask(first))?.status, TaskStatus.cancelled);
+      expect(
+        (await harness.queue.getTask(first))?.status,
+        TaskStatus.cancelled,
+      );
     });
 
     test('an unregistered type cannot be retried', () async {
