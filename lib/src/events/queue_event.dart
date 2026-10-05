@@ -1,9 +1,13 @@
+/// @docImport '../queue/durable_queue.dart';
+library;
+
 import '../task/task_failure.dart';
 
 /// A lifecycle notification.
 ///
 /// The stream is broadcast and does not replay past events. Subscribe before
-/// calling [start] or [enqueue] if those events matter.
+/// calling [DurableQueue.start] or [DurableQueue.enqueue] if those events
+/// matter.
 sealed class QueueEvent {
   /// Creates an event that occurred at [occurredAt].
   const QueueEvent({

@@ -137,9 +137,14 @@ final class DurableQueue {
   int? _sequence;
   DateTime? _wakeAt;
   QueueDelay? _activeDelay;
+  var _closed = false;
+  Future<void>? _closing;
 
   /// Whether the worker is idle, running, paused, or stopping.
   QueueRunState get runState => _runState;
+
+  /// Whether [close] has been called.
+  bool get isClosed => _closed;
 
   /// Lifecycle events. This is a broadcast stream and does not replay.
   Stream<QueueEvent> get events => _events.stream;
@@ -166,6 +171,7 @@ final class DurableQueue {
     required TaskHandler<T> handler,
     RetryPredicate? retryIf,
   }) {
+    _ensureOpen();
     _registry.register<T>(
       type: type,
       decoder: decoder,
@@ -198,6 +204,7 @@ final class DurableQueue {
     String? deduplicationKey,
     String? idempotencyKey,
   }) async {
+    _ensureOpen();
     if (task.type.isEmpty) {
       throw ArgumentError.value(task.type, 'type', 'Must not be empty');
     }
@@ -264,9 +271,12 @@ final class DurableQueue {
   /// Recovery errors propagate and leave the queue idle so this call can be
   /// retried. Successfully recovered records stay updated.
   ///
-  /// Throws [StateError] unless the queue is [QueueRunState.idle].
+  /// Throws [StateError] unless the queue is [QueueRunState.idle], or if the
+  /// queue was closed.
   Future<void> start() async {
+    _ensureOpen();
     await _lock.synchronized(() async {
+      _ensureOpen();
       if (_runState != QueueRunState.idle) {
         throw StateError('Cannot start a queue from $_runState');
       }
@@ -359,6 +369,7 @@ final class DurableQueue {
   ///
   /// Throws [TaskNotFoundException] when [id] is not stored.
   Future<void> cancel(String id) async {
+    _ensureOpen();
     final event = await _lock.synchronized(() async {
       final task = await _storage.get(id);
       if (task == null) throw TaskNotFoundException(id);
@@ -411,6 +422,161 @@ final class DurableQueue {
       if (status == null) return _storage.getAll();
       return _storage.getByStatus(status);
     });
+  }
+
+  /// Puts a [TaskStatus.failed] or [TaskStatus.cancelled] task back in the
+  /// queue and returns its id.
+  ///
+  /// The task keeps its id, payload, keys, `createdAt`, and `sequence`, so it
+  /// runs in its original order relative to other stored tasks. It becomes
+  /// [TaskStatus.pending] with a fresh attempt budget: `attempts` resets to
+  /// zero. [StoredTask.lastFailure] is kept for reference until the next
+  /// attempt replaces or clears it. Pass [retryPolicy] to replace the stored
+  /// policy.
+  ///
+  /// A [TaskEnqueued] event is emitted, and a running queue starts the task
+  /// when a slot is free.
+  ///
+  /// Throws [TaskNotFoundException] when [id] is not stored,
+  /// [UnknownTaskTypeException] when its type is not registered, and
+  /// [StateError] when the task is not failed or cancelled, or when another
+  /// active task already holds its deduplication key.
+  Future<String> retry(String id, {RetryPolicy? retryPolicy}) async {
+    _ensureOpen();
+    final event = await _lock.synchronized(() async {
+      final task = await _storage.get(id);
+      if (task == null) throw TaskNotFoundException(id);
+      if (task.status != TaskStatus.failed &&
+          task.status != TaskStatus.cancelled) {
+        throw StateError(
+          'Only failed or cancelled tasks can be retried. '
+          'Task "$id" is ${task.status.name}.',
+        );
+      }
+      if (!_registry.contains(task.type)) {
+        throw _registry.unknownType(task.type);
+      }
+      final key = task.deduplicationKey;
+      if (key != null) {
+        final active = await _storage.findActiveByDeduplicationKey(key);
+        if (active != null) {
+          throw StateError(
+            'Task "${active.id}" is already active with deduplication key '
+            '"$key".',
+          );
+        }
+      }
+
+      final now = _clock.now();
+      await _storage.update(
+        task.copyWith(
+          status: TaskStatus.pending,
+          attempts: 0,
+          retryPolicy: retryPolicy,
+          updatedAt: now,
+          nextAttemptAt: null,
+          cancelRequested: false,
+        ),
+      );
+      _cancelRequested.remove(task.id);
+      return TaskEnqueued(
+        taskId: task.id,
+        taskType: task.type,
+        occurredAt: now,
+        deduplicationKey: task.deduplicationKey,
+        idempotencyKey: task.idempotencyKey,
+      );
+    });
+    _emit(event);
+    if (_runState == QueueRunState.running) unawaited(_pump());
+    return id;
+  }
+
+  /// Removes a finished task from storage.
+  ///
+  /// Only [TaskStatus.completed], [TaskStatus.failed], and
+  /// [TaskStatus.cancelled] tasks can be deleted. Cancel an active task
+  /// first. No event is emitted.
+  ///
+  /// Throws [TaskNotFoundException] when [id] is not stored and [StateError]
+  /// when the task is still pending, running, or retry-scheduled.
+  Future<void> delete(String id) async {
+    _ensureOpen();
+    await _lock.synchronized(() async {
+      final task = await _storage.get(id);
+      if (task == null) throw TaskNotFoundException(id);
+      if (!task.status.isTerminal) {
+        throw StateError(
+          'Only finished tasks can be deleted. '
+          'Task "$id" is ${task.status.name}.',
+        );
+      }
+      await _storage.delete(id);
+    });
+  }
+
+  /// Deletes finished tasks and returns how many were removed.
+  ///
+  /// [statuses] defaults to [TaskStatus.completed] only. Every status must
+  /// be terminal (completed, failed, or cancelled); active statuses throw
+  /// [ArgumentError]. When [olderThan] is set, only tasks whose
+  /// [StoredTask.updatedAt] is at least that long before the queue clock's
+  /// current time are removed.
+  ///
+  /// Matching records are loaded with [QueueStorage.getByStatus] and
+  /// deleted one at a time while the queue lock is held. No events are
+  /// emitted.
+  Future<int> purge({
+    Set<TaskStatus> statuses = const {TaskStatus.completed},
+    Duration? olderThan,
+  }) async {
+    _ensureOpen();
+    for (final status in statuses) {
+      if (!status.isTerminal) {
+        throw ArgumentError.value(
+          status,
+          'statuses',
+          'Only completed, failed, and cancelled tasks can be purged',
+        );
+      }
+    }
+    if (olderThan != null && olderThan.isNegative) {
+      throw ArgumentError.value(olderThan, 'olderThan', 'Must not be negative');
+    }
+    return _lock.synchronized(() async {
+      final cutoff = olderThan == null
+          ? null
+          : _clock.now().subtract(olderThan);
+      var removed = 0;
+      for (final status in statuses) {
+        final tasks = await _storage.getByStatus(status);
+        for (final task in tasks) {
+          if (cutoff != null && task.updatedAt.isAfter(cutoff)) continue;
+          await _storage.delete(task.id);
+          removed++;
+        }
+      }
+      return removed;
+    });
+  }
+
+  /// Stops the queue, then closes [events] and [storageErrors].
+  ///
+  /// Waits like [stop]. Afterwards [register], [enqueue], [start], [cancel],
+  /// [retry], [delete], and [purge] throw [StateError]. [getTask] and
+  /// [getTasks] keep working. The storage is not closed; it belongs to the
+  /// caller. Calling [close] again returns the same future.
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
+    _closed = true;
+    await stop();
+    await _events.close();
+    await _storageErrors.close();
+  }
+
+  void _ensureOpen() {
+    if (_closed) throw StateError('DurableQueue is closed');
   }
 
   Future<QueueEvent?> _recoverInterrupted(StoredTask task) async {
@@ -899,15 +1065,18 @@ final class DurableQueue {
       try {
         return await operation();
       } on Object catch (error, stackTrace) {
-        _storageErrors.add(
-          QueueStorageFailure(
-            operation: name,
-            error: error,
-            stackTrace: stackTrace,
-            occurredAt: _clock.now(),
-            attempt: ++attempt,
-          ),
-        );
+        attempt++;
+        if (!_storageErrors.isClosed) {
+          _storageErrors.add(
+            QueueStorageFailure(
+              operation: name,
+              error: error,
+              stackTrace: stackTrace,
+              occurredAt: _clock.now(),
+              attempt: attempt,
+            ),
+          );
+        }
         // This is storage recovery, not a handler retry. It neither consumes
         // task attempts nor re-invokes business logic.
         await _clock.delayUntil(_clock.now().add(storageRetryDelay)).future;

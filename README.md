@@ -39,7 +39,7 @@ await queue.enqueue(
 
 ```yaml
 dependencies:
-  durable_queue: ^0.1.0
+  durable_queue: ^0.2.0
 ```
 
 `MemoryQueueStorage` keeps tasks in the process. It is the right storage for tests and for work that does not need to survive a restart. A storage adapter implements `QueueStorage`; the core package does not ship a database.
@@ -128,6 +128,32 @@ Cancelling queued work marks it `cancelled` immediately. Cancelling a running ta
 
 `pause` finishes handlers that have already started and does not start new ones. `stop` waits for those handlers and leaves everything else stored.
 
+## Retry, delete, and purge finished tasks
+
+Completed, failed, and cancelled tasks stay in storage until you remove them.
+
+```dart
+// Run a failed or cancelled task again with a fresh attempt budget.
+await queue.retry(taskId);
+
+// Remove one finished task.
+await queue.delete(taskId);
+
+// Remove completed tasks older than a week. Returns the number removed.
+final removed = await queue.purge(
+  statuses: {TaskStatus.completed},
+  olderThan: Duration(days: 7),
+);
+```
+
+`retry` keeps the task id, payload, and keys, and can take a new `retryPolicy`. It refuses tasks that are still active, and refuses when another active task already holds the same deduplication key. `delete` and `purge` only touch terminal tasks.
+
+When the queue is no longer needed, `close` stops it and closes the `events` and `storageErrors` streams:
+
+```dart
+await queue.close();
+```
+
 ## Observation
 
 ```dart
@@ -153,7 +179,7 @@ Persistence is not background execution. A terminated app stays terminated until
 
 Do not put secrets in task payloads or exception text. The queue stores them as plain data. `MemoryQueueStorage` does not encrypt anything.
 
-Details: [execution semantics](doc/execution-semantics.md), [storage contract](doc/storage.md). The design notes for 0.1.0 are in [doc/design.md](doc/design.md).
+Writing your own storage adapter? Follow the [storage contract](STORAGE.md).
 
 ## Example
 

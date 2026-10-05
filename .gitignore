@@ -27,3 +27,10 @@ doc/api/
 
 .flutter-plugins
 .flutter-plugins-dependencies
+
+# IDE files
+.idea/
+*.iml
+
+# Private design notes (kept locally, not published)
+doc/

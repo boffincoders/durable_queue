@@ -1,3 +1,6 @@
+/// @docImport 'durable_queue.dart';
+library;
+
 /// Lifecycle of a [DurableQueue] instance.
 enum QueueRunState {
   /// Created or fully stopped. Tasks may be stored, but none will start.
@@ -6,9 +9,10 @@ enum QueueRunState {
   /// Eligible tasks are allowed to start, up to the concurrency limit.
   running,
 
-  /// In-flight handlers continue. No further tasks start until [resume].
+  /// In-flight handlers continue. No further tasks start until
+  /// [DurableQueue.resume].
   paused,
 
-  /// [stop] is waiting for in-flight handlers to finish.
+  /// [DurableQueue.stop] is waiting for in-flight handlers to finish.
   stopping,
 }

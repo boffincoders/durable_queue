@@ -6,7 +6,7 @@ import 'support/harness.dart';
 /// Behaviors every [QueueStorage] adapter must satisfy.
 ///
 /// Adapter packages can mirror this suite. The scenarios are also described
-/// in `doc/storage.md`.
+/// in `STORAGE.md`.
 void queueStorageContractTests(QueueStorage Function() create) {
   late QueueStorage storage;
 

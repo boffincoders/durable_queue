@@ -2,9 +2,10 @@
 ///
 /// ```text
 /// pending → running → completed
-///                  ↘ retryScheduled → pending
+///                  ↘ retryScheduled → running
 ///                  ↘ failed
 /// pending or retryScheduled → cancelled
+/// failed or cancelled → pending   (DurableQueue.retry)
 /// ```
 enum TaskStatus {
   /// Stored and eligible to start when the queue is running.
@@ -23,5 +24,13 @@ enum TaskStatus {
   failed,
 
   /// The task was cancelled before it finished.
-  cancelled,
+  cancelled;
+
+  /// Whether the task can still run: [pending], [running], or
+  /// [retryScheduled].
+  bool get isActive => !isTerminal;
+
+  /// Whether the task has finished: [completed], [failed], or [cancelled].
+  bool get isTerminal =>
+      this == completed || this == failed || this == cancelled;
 }
