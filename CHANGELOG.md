@@ -1,3 +1,15 @@
+## 0.3.1
+
+Documentation and examples only. No API or behavior changes.
+
+* Add `example/image_upload.dart`, a photo-upload flow with selective retries,
+  idempotency and deduplication keys, and tasks that survive a restart.
+* Add `example/json_file_storage.dart`, a file-backed reference adapter that
+  passes the full storage contract suite.
+* README: problem statement, quick start, architecture diagram, use cases,
+  Flutter integration, storage options, and a capability comparison.
+* CONTRIBUTING: discussion, issue, pull request, and adapter guidelines.
+
 ## 0.3.0
 
 Orchestration: priorities, dependencies, chains, and groups.
