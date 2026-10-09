@@ -192,4 +192,136 @@ void queueStorageContractTests(QueueStorage Function() create) {
     expect(await storage.getMaxSequence(), 0);
     expect(await storage.getByStatus(TaskStatus.running, limit: 10), isEmpty);
   });
+
+  test('getNextReady orders by priority before enqueue order', () async {
+    final now = DateTime.utc(2026);
+    await storage.save(storedTask(id: 'old-low', sequence: 1, priority: -1));
+    await storage.save(storedTask(id: 'normal', sequence: 2));
+    await storage.save(
+      storedTask(
+        id: 'due-high',
+        sequence: 3,
+        priority: 5,
+        status: TaskStatus.retryScheduled,
+        nextAttemptAt: now,
+      ),
+    );
+    await storage.save(
+      storedTask(
+        id: 'future-top',
+        sequence: 4,
+        priority: 9,
+        status: TaskStatus.retryScheduled,
+        nextAttemptAt: now.add(const Duration(minutes: 1)),
+      ),
+    );
+
+    expect((await storage.getNextReady(now))?.id, 'due-high');
+    await storage.delete('due-high');
+    expect((await storage.getNextReady(now))?.id, 'normal');
+    await storage.delete('normal');
+    expect((await storage.getNextReady(now))?.id, 'old-low');
+    expect(
+      (await storage.getNextReady(now.add(const Duration(minutes: 1))))?.id,
+      'future-top',
+    );
+  });
+
+  test('waiting tasks are never ready but count as active', () async {
+    await storage.save(
+      storedTask(
+        id: 'waiting',
+        status: TaskStatus.waiting,
+        dependsOn: ['parent'],
+        deduplicationKey: 'key',
+      ),
+    );
+
+    expect(await storage.getNextReady(DateTime.utc(2030)), isNull);
+    expect((await storage.findActiveByDeduplicationKey('key'))?.id, 'waiting');
+  });
+
+  test('getWaitingDependents follows status and dependency edges', () async {
+    await storage.save(
+      storedTask(
+        id: 'b',
+        status: TaskStatus.waiting,
+        dependsOn: ['root', 'other'],
+        sequence: 2,
+      ),
+    );
+    await storage.save(
+      storedTask(
+        id: 'a',
+        status: TaskStatus.waiting,
+        dependsOn: ['root'],
+        sequence: 1,
+      ),
+    );
+    await storage.save(
+      storedTask(id: 'released', dependsOn: ['root'], sequence: 3),
+    );
+
+    expect(
+      (await storage.getWaitingDependents('root')).map((task) => task.id),
+      ['a', 'b'],
+    );
+    expect(
+      (await storage.getWaitingDependents('other')).map((task) => task.id),
+      ['b'],
+    );
+    expect(await storage.getWaitingDependents('nobody'), isEmpty);
+
+    await storage.update(
+      (await storage.get('a'))!.copyWith(status: TaskStatus.pending),
+    );
+    await storage.delete('b');
+    expect(await storage.getWaitingDependents('root'), isEmpty);
+  });
+
+  test('getByGroup filters by group and optional status', () async {
+    await storage.save(storedTask(id: 'a', group: 'sync', sequence: 1));
+    await storage.save(
+      storedTask(
+        id: 'b',
+        group: 'sync',
+        sequence: 2,
+        status: TaskStatus.completed,
+      ),
+    );
+    await storage.save(storedTask(id: 'c', group: 'upload', sequence: 3));
+    await storage.save(storedTask(id: 'd', sequence: 4));
+
+    expect((await storage.getByGroup('sync')).map((t) => t.id), ['a', 'b']);
+    expect(
+      (await storage.getByGroup(
+        'sync',
+        status: TaskStatus.completed,
+      )).map((t) => t.id),
+      ['b'],
+    );
+    expect(await storage.getByGroup('missing'), isEmpty);
+
+    await storage.update((await storage.get('a'))!.copyWith(group: 'upload'));
+    expect((await storage.getByGroup('sync')).map((t) => t.id), ['b']);
+    expect((await storage.getByGroup('upload')).map((t) => t.id), ['a', 'c']);
+  });
+
+  test('orchestration fields persist', () async {
+    await storage.save(
+      storedTask(
+        id: 'a',
+        status: TaskStatus.waiting,
+        priority: 3,
+        dependsOn: ['x', 'y'],
+        onDependencyFailure: DependencyFailurePolicy.run,
+        group: 'g',
+      ),
+    );
+    final loaded = await storage.get('a');
+    expect(loaded?.priority, 3);
+    expect(loaded?.dependsOn, ['x', 'y']);
+    expect(loaded?.onDependencyFailure, DependencyFailurePolicy.run);
+    expect(loaded?.group, 'g');
+  });
 }

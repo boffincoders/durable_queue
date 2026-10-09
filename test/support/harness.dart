@@ -98,6 +98,10 @@ StoredTask storedTask({
   String? idempotencyKey,
   TaskFailure? lastFailure,
   bool cancelRequested = false,
+  int priority = 0,
+  List<String> dependsOn = const [],
+  DependencyFailurePolicy onDependencyFailure = DependencyFailurePolicy.cancel,
+  String? group,
 }) {
   final created = createdAt ?? DateTime.utc(2026, 1, 1);
   return StoredTask(
@@ -115,6 +119,10 @@ StoredTask storedTask({
     idempotencyKey: idempotencyKey,
     lastFailure: lastFailure,
     cancelRequested: cancelRequested,
+    priority: priority,
+    dependsOn: dependsOn,
+    onDependencyFailure: onDependencyFailure,
+    group: group,
   );
 }
 

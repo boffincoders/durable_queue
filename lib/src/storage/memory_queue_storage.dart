@@ -15,8 +15,10 @@ final class MemoryQueueStorage implements QueueStorage {
   final Map<String, StoredTask> _tasks = {};
   final _byStatus = <TaskStatus, SplayTreeSet<StoredTask>>{};
   final _byKey = <String, SplayTreeSet<StoredTask>>{};
+  final _byGroup = <String, SplayTreeSet<StoredTask>>{};
+  final _waitingOn = <String, SplayTreeSet<StoredTask>>{};
   final _sequences = SplayTreeMap<int, int>();
-  final _ready = SplayTreeSet<StoredTask>(compareStoredTasks);
+  final _ready = SplayTreeSet<StoredTask>(compareReadyTasks);
   final _future = SplayTreeSet<StoredTask>(_compareTime);
   final _due = SplayTreeSet<StoredTask>(_compareTime);
   DateTime? _indexedAt;
@@ -88,6 +90,23 @@ final class MemoryQueueStorage implements QueueStorage {
   }
 
   @override
+  Future<List<StoredTask>> getWaitingDependents(String id) async {
+    final tasks = _waitingOn[id];
+    return List<StoredTask>.unmodifiable(tasks ?? const <StoredTask>[]);
+  }
+
+  @override
+  Future<List<StoredTask>> getByGroup(
+    String group, {
+    TaskStatus? status,
+  }) async {
+    final tasks = _byGroup[group] ?? const <StoredTask>[];
+    return List<StoredTask>.unmodifiable(
+      status == null ? tasks : tasks.where((task) => task.status == status),
+    );
+  }
+
+  @override
   Future<void> update(StoredTask task) async {
     final previous = _tasks[task.id];
     if (previous == null) {
@@ -112,6 +131,15 @@ final class MemoryQueueStorage implements QueueStorage {
         compareStoredTasks,
       )).add(task);
     }
+    final group = task.group;
+    if (group != null) {
+      (_byGroup[group] ??= SplayTreeSet(compareStoredTasks)).add(task);
+    }
+    if (task.status == TaskStatus.waiting) {
+      for (final dependency in task.dependsOn) {
+        (_waitingOn[dependency] ??= SplayTreeSet(compareStoredTasks)).add(task);
+      }
+    }
     if (!_schedulable.contains(task.status)) return;
     final at = task.nextAttemptAt;
     if (at == null) {
@@ -132,6 +160,13 @@ final class MemoryQueueStorage implements QueueStorage {
       tasks?.remove(task);
       if (tasks != null && tasks.isEmpty) _byKey.remove(key);
     }
+    final group = task.group;
+    if (group != null) _removeFrom(_byGroup, group, task);
+    if (task.status == TaskStatus.waiting) {
+      for (final dependency in task.dependsOn) {
+        _removeFrom(_waitingOn, dependency, task);
+      }
+    }
     final count = _sequences[task.sequence]!;
     if (count == 1) {
       _sequences.remove(task.sequence);
@@ -145,8 +180,23 @@ final class MemoryQueueStorage implements QueueStorage {
     }
   }
 
+  static void _removeFrom(
+    Map<String, SplayTreeSet<StoredTask>> index,
+    String key,
+    StoredTask task,
+  ) {
+    final tasks = index[key];
+    if (tasks == null) return;
+    tasks.remove(task);
+    if (tasks.isEmpty) index.remove(key);
+  }
+
   static const _schedulable = {TaskStatus.pending, TaskStatus.retryScheduled};
-  static const _active = {..._schedulable, TaskStatus.running};
+  static const _active = {
+    ..._schedulable,
+    TaskStatus.running,
+    TaskStatus.waiting,
+  };
 
   static int _compareTime(StoredTask a, StoredTask b) {
     final order = a.nextAttemptAt!.compareTo(b.nextAttemptAt!);

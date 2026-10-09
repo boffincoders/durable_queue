@@ -1,6 +1,10 @@
+/// @docImport '../storage/queue_storage.dart';
+library;
+
 import 'dart:collection';
 
 import '../retry/retry_policy.dart';
+import 'dependency_failure_policy.dart';
 import 'task_failure.dart';
 import 'task_status.dart';
 
@@ -30,7 +34,12 @@ final class StoredTask {
     this.idempotencyKey,
     this.lastFailure,
     this.cancelRequested = false,
-  }) : payload = _freezeMap(payload) {
+    this.priority = 0,
+    Iterable<String> dependsOn = const [],
+    this.onDependencyFailure = DependencyFailurePolicy.cancel,
+    this.group,
+  }) : payload = _freezeMap(payload),
+       dependsOn = List<String>.unmodifiable(LinkedHashSet.of(dependsOn)) {
     if (id.isEmpty) {
       throw ArgumentError.value(id, 'id', 'Must not be empty');
     }
@@ -42,6 +51,25 @@ final class StoredTask {
     }
     if (sequence < 0) {
       throw ArgumentError.value(sequence, 'sequence', 'Must not be negative');
+    }
+    for (final dependency in this.dependsOn) {
+      if (dependency.isEmpty) {
+        throw ArgumentError.value(
+          dependency,
+          'dependsOn',
+          'Must not contain an empty id',
+        );
+      }
+      if (dependency == id) {
+        throw ArgumentError.value(
+          dependency,
+          'dependsOn',
+          'A task cannot depend on itself',
+        );
+      }
+    }
+    if (group != null && group!.isEmpty) {
+      throw ArgumentError.value(group, 'group', 'Must not be empty');
     }
   }
 
@@ -91,11 +119,27 @@ final class StoredTask {
   /// Whether cancellation was requested while the task was running.
   final bool cancelRequested;
 
+  /// Scheduling priority. Higher values start first among eligible tasks.
+  ///
+  /// Defaults to zero. Tasks with equal priority keep enqueue order.
+  final int priority;
+
+  /// Ids of tasks that must finish before this one may start.
+  ///
+  /// Unmodifiable, without duplicates, in the order given at enqueue.
+  final List<String> dependsOn;
+
+  /// What happens to this task if a dependency does not complete.
+  final DependencyFailurePolicy onDependencyFailure;
+
+  /// Optional application label used to query or cancel related tasks.
+  final String? group;
+
   /// Returns a copy with the given fields replaced.
   ///
   /// Nullable fields use a sentinel so they can be cleared. Pass `null` to
-  /// clear [nextAttemptAt], [deduplicationKey], [idempotencyKey], or
-  /// [lastFailure].
+  /// clear [nextAttemptAt], [deduplicationKey], [idempotencyKey],
+  /// [lastFailure], or [group].
   StoredTask copyWith({
     String? id,
     String? type,
@@ -111,6 +155,10 @@ final class StoredTask {
     Object? idempotencyKey = _unset,
     Object? lastFailure = _unset,
     bool? cancelRequested,
+    int? priority,
+    Iterable<String>? dependsOn,
+    DependencyFailurePolicy? onDependencyFailure,
+    Object? group = _unset,
   }) {
     return StoredTask(
       id: id ?? this.id,
@@ -135,6 +183,10 @@ final class StoredTask {
           ? this.lastFailure
           : lastFailure as TaskFailure?,
       cancelRequested: cancelRequested ?? this.cancelRequested,
+      priority: priority ?? this.priority,
+      dependsOn: dependsOn ?? this.dependsOn,
+      onDependencyFailure: onDependencyFailure ?? this.onDependencyFailure,
+      group: identical(group, _unset) ? this.group : group as String?,
     );
   }
 
@@ -154,9 +206,17 @@ final class StoredTask {
     'idempotencyKey': idempotencyKey,
     'lastFailure': lastFailure?.toJson(),
     'cancelRequested': cancelRequested,
+    'priority': priority,
+    'dependsOn': dependsOn,
+    'onDependencyFailure': onDependencyFailure.name,
+    'group': group,
   };
 
   /// Restores a record produced by [toJson].
+  ///
+  /// Records written before 0.3.0 have no `priority`, `dependsOn`,
+  /// `onDependencyFailure`, or `group` keys. They load with priority zero, no
+  /// dependencies, [DependencyFailurePolicy.cancel], and no group.
   factory StoredTask.fromJson(Map<String, dynamic> json) {
     final statusName = _requireString(json, 'status');
     final status = TaskStatus.values.where((value) => value.name == statusName);
@@ -185,11 +245,24 @@ final class StoredTask {
           ? null
           : TaskFailure.fromJson(_requireObject(failure, 'lastFailure')),
       cancelRequested: _requireBool(json, 'cancelRequested'),
+      priority: _optionalInt(json, 'priority') ?? 0,
+      dependsOn: _optionalStringList(json, 'dependsOn'),
+      onDependencyFailure: _dependencyPolicy(json),
+      group: _optionalString(json, 'group'),
     );
   }
 
   @override
   String toString() => 'StoredTask($id, $type, $status, attempts: $attempts)';
+}
+
+/// Scheduling order used by [QueueStorage.getNextReady].
+///
+/// Highest [StoredTask.priority] first, then [compareStoredTasks].
+int compareReadyTasks(StoredTask a, StoredTask b) {
+  final byPriority = b.priority.compareTo(a.priority);
+  if (byPriority != 0) return byPriority;
+  return compareStoredTasks(a, b);
 }
 
 /// Oldest [StoredTask.createdAt], then [StoredTask.sequence], then id.
@@ -218,6 +291,31 @@ int _requireInt(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value is int) return value;
   throw FormatException('StoredTask.$key must be an int');
+}
+
+int? _optionalInt(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return null;
+  if (value is int) return value;
+  throw FormatException('StoredTask.$key must be an int or null');
+}
+
+List<String> _optionalStringList(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null) return const [];
+  if (value is List && value.every((item) => item is String)) {
+    return value.cast<String>();
+  }
+  throw FormatException('StoredTask.$key must be a list of strings or null');
+}
+
+DependencyFailurePolicy _dependencyPolicy(Map<String, dynamic> json) {
+  final value = json['onDependencyFailure'];
+  if (value == null) return DependencyFailurePolicy.cancel;
+  for (final policy in DependencyFailurePolicy.values) {
+    if (policy.name == value) return policy;
+  }
+  throw FormatException('Unknown dependency failure policy "$value"');
 }
 
 bool _requireBool(Map<String, dynamic> json, String key) {

@@ -1,3 +1,37 @@
+## 0.3.0
+
+Orchestration: priorities, dependencies, chains, and groups.
+
+* Add `priority` to `enqueue`. Among ready tasks, higher priority starts first;
+  equal priorities keep enqueue order.
+* Add `dependsOn` and `onDependencyFailure` to `enqueue`. A task waits in the
+  new `TaskStatus.waiting` state until its dependencies complete. If one fails,
+  is cancelled, or is missing, `DependencyFailurePolicy` cancels the task (the
+  default), fails it, or runs it anyway. Outcomes cascade to further
+  dependents, and the blocking dependency is recorded as a
+  `DependencyFailedException` in `lastFailure`.
+* Add `enqueueChain` to store tasks that run one after another.
+* Add `group` to `enqueue`, `getTasks(group:)`, and `cancelGroup`.
+* `retry` restores a task to `waiting` while its dependencies are still active,
+  and refuses while a dependency has not completed. `delete` and `purge` never
+  remove a task that a waiting task depends on.
+* Dependents are written before the task that settles them, so a crash cannot
+  leave a task waiting behind a finished dependency. Startup still uses only
+  bounded queries.
+* Add `example/orchestration.dart`.
+
+### Breaking changes
+
+* `TaskStatus` has a new value, `waiting`. Exhaustive `switch` statements over
+  `TaskStatus` need a case for it. It is declared last, so the index of every
+  existing value is unchanged. `waiting` is active: it blocks deduplication
+  keys and counts for `isActive`.
+* Custom `QueueStorage` adapters must implement `getWaitingDependents` and
+  `getByGroup`, persist the new `StoredTask` fields (`priority`, `dependsOn`,
+  `onDependencyFailure`, `group`), and order `getNextReady` by priority first
+  (`compareReadyTasks`). See `STORAGE.md`. Records stored by earlier versions
+  load with default values, so no data migration is needed.
+
 ## 0.2.0
 
 * Add `DurableQueue.retry` to re-queue a failed or cancelled task with a fresh

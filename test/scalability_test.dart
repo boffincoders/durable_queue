@@ -89,6 +89,12 @@ void main() {
                 ? null
                 : epoch.add(Duration(seconds: random.nextInt(10))),
             deduplicationKey: 'key-${random.nextInt(3)}',
+            priority: random.nextInt(3) - 1,
+            group: random.nextBool() ? 'group-${random.nextInt(2)}' : null,
+            dependsOn: [
+              for (var i = random.nextInt(3); i > 0; i--)
+                'dep-${random.nextInt(4)}',
+            ],
           );
           if (records.containsKey(id)) {
             await storage.update(record);
@@ -106,11 +112,14 @@ void main() {
                   t.status == TaskStatus.retryScheduled,
             )
             .toList();
-        final ready = active
-            .where(
-              (t) => t.nextAttemptAt == null || !t.nextAttemptAt!.isAfter(now),
-            )
-            .toList();
+        final ready =
+            active
+                .where(
+                  (t) =>
+                      t.nextAttemptAt == null || !t.nextAttemptAt!.isAfter(now),
+                )
+                .toList()
+              ..sort(compareReadyTasks);
         final times =
             active.map((t) => t.nextAttemptAt).whereType<DateTime>().toList()
               ..sort();
@@ -137,6 +146,7 @@ void main() {
                     t.deduplicationKey == 'key-$key' &&
                     [
                       TaskStatus.pending,
+                      TaskStatus.waiting,
                       TaskStatus.retryScheduled,
                       TaskStatus.running,
                     ].contains(t.status),
@@ -145,6 +155,34 @@ void main() {
           expect(
             (await storage.findActiveByDeduplicationKey('key-$key'))?.id,
             expected?.id,
+          );
+        }
+        for (var group = 0; group < 2; group++) {
+          final members = ordered.where((t) => t.group == 'group-$group');
+          expect(
+            (await storage.getByGroup('group-$group')).map((t) => t.id),
+            members.map((t) => t.id),
+          );
+          expect(
+            (await storage.getByGroup(
+              'group-$group',
+              status: TaskStatus.waiting,
+            )).map((t) => t.id),
+            members
+                .where((t) => t.status == TaskStatus.waiting)
+                .map((t) => t.id),
+          );
+        }
+        for (var dep = 0; dep < 4; dep++) {
+          expect(
+            (await storage.getWaitingDependents('dep-$dep')).map((t) => t.id),
+            ordered
+                .where(
+                  (t) =>
+                      t.status == TaskStatus.waiting &&
+                      t.dependsOn.contains('dep-$dep'),
+                )
+                .map((t) => t.id),
           );
         }
       }

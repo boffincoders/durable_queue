@@ -22,6 +22,9 @@ final class TaskFailure {
   final DateTime failedAt;
 
   /// 1-based attempt number that failed.
+  ///
+  /// Zero when the task never started, for example when a dependency did
+  /// not complete.
   final int attempt;
 
   /// Serializes this failure.

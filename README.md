@@ -4,7 +4,8 @@ Persistent, retryable task execution for Dart and Flutter.
 
 * Tasks are data, so they can be stored and rebuilt after a restart
 * Fixed and exponential retry, with optional jitter
-* Concurrency limits
+* Concurrency limits and priorities
+* Task dependencies, chains, and groups
 * Deduplication and idempotency metadata
 * Cancellation
 * A lifecycle event stream
@@ -39,7 +40,7 @@ await queue.enqueue(
 
 ```yaml
 dependencies:
-  durable_queue: ^0.2.0
+  durable_queue: ^0.3.0
 ```
 
 `MemoryQueueStorage` keeps tasks in the process. It is the right storage for tests and for work that does not need to survive a restart. A storage adapter implements `QueueStorage`; the core package does not ship a database.
@@ -115,6 +116,61 @@ If a task with that deduplication key is already `pending`, `running`, or `retry
 
 The idempotency key is stored and exposed on `TaskContext`. The handler decides how to send it. The same key does not, by itself, collapse two tasks.
 
+## Priorities
+
+```dart
+await queue.enqueue(SendMessageTask(text: 'hi'), priority: 10);
+await queue.enqueue(UploadLogsTask(), priority: -5);
+```
+
+Among tasks that are ready to start, higher `priority` goes first; equal priorities keep enqueue order. The default is `0`. Priority decides which task gets the next free slot. It never interrupts a handler that is already running.
+
+## Dependencies and chains
+
+A task can wait for other tasks:
+
+```dart
+final upload = await queue.enqueue(UploadPhotoTask(path: path));
+final resize = await queue.enqueue(
+  ResizePhotoTask(path: path),
+  dependsOn: [upload],
+);
+```
+
+Until every dependency is `completed`, the dependent task is `waiting` and does not use a concurrency slot. If a dependency fails, is cancelled, or no longer exists, `onDependencyFailure` decides what happens:
+
+| `DependencyFailurePolicy` | Effect on the waiting task |
+|---|---|
+| `cancel` (default) | Becomes `cancelled` without running. |
+| `fail` | Becomes `failed` without running. |
+| `run` | Runs anyway once every dependency has finished. Good for cleanup. |
+
+The outcome cascades: if `resize` is cancelled, tasks waiting on `resize` follow their own policy. The task's `lastFailure` names the dependency that blocked it.
+
+`enqueueChain` stores steps that run one after another, even when `maxConcurrentTasks` is greater than one:
+
+```dart
+final ids = await queue.enqueueChain([
+  UploadPhotoTask(path: path),
+  ResizePhotoTask(path: path),
+  NotifyFriendsTask(path: path),
+], group: 'photo:$path');
+```
+
+With the default policy, a failed step cancels the rest of the chain. Dependencies must already be stored when you enqueue, so cycles cannot be created.
+
+## Groups
+
+```dart
+await queue.enqueue(SyncContactsTask(), group: 'sync');
+await queue.enqueue(SyncCalendarTask(), group: 'sync');
+
+final syncTasks = await queue.getTasks(group: 'sync');
+final cancelled = await queue.cancelGroup('sync');
+```
+
+A group is a label. `cancelGroup` cancels every active task in it, using the same rules as `cancel`, and returns how many tasks it affected.
+
 ## Cancellation and controls
 
 ```dart
@@ -124,7 +180,7 @@ await queue.resume();
 await queue.stop();
 ```
 
-Cancelling queued work marks it `cancelled` immediately. Cancelling a running task does not abort the future. The handler can read `context.isCancellationRequested` and throw `TaskCancelledException` to stop. If it returns normally, the task is completed.
+Cancelling queued or waiting work marks it `cancelled` immediately. Cancelling a running task does not abort the future. The handler can read `context.isCancellationRequested` and throw `TaskCancelledException` to stop. If it returns normally, the task is completed.
 
 `pause` finishes handlers that have already started and does not start new ones. `stop` waits for those handlers and leaves everything else stored.
 
@@ -146,7 +202,7 @@ final removed = await queue.purge(
 );
 ```
 
-`retry` keeps the task id, payload, and keys, and can take a new `retryPolicy`. It refuses tasks that are still active, and refuses when another active task already holds the same deduplication key. `delete` and `purge` only touch terminal tasks.
+`retry` keeps the task id, payload, keys, priority, group, and dependencies, and can take a new `retryPolicy`. It refuses tasks that are still active, refuses when another active task already holds the same deduplication key, and refuses when a dependency did not complete (retry that dependency first). Tasks cancelled because a dependency failed are not revived automatically. `delete` and `purge` only touch terminal tasks, and never remove a task that a waiting task still depends on.
 
 When the queue is no longer needed, `close` stops it and closes the `events` and `storageErrors` streams:
 
@@ -175,6 +231,8 @@ Execution is **at least once**. A crash after a side effect but before the compl
 
 `start` recovers a task left in `running`: that attempt counts, then the retry policy either schedules another try or fails the task. Handlers should be idempotent when a repeated side effect would be harmful.
 
+When a task finishes, the tasks waiting on it are updated before its own result is written. A crash in between never leaves a task waiting forever behind a dependency that already finished. The worst case is that dependents were released or cancelled for an outcome that recovery then records again.
+
 Persistence is not background execution. A terminated app stays terminated until something else launches it. After the next launch, call `start` again.
 
 Do not put secrets in task payloads or exception text. The queue stores them as plain data. `MemoryQueueStorage` does not encrypt anything.
@@ -185,4 +243,5 @@ Writing your own storage adapter? Follow the [storage contract](STORAGE.md).
 
 ```sh
 dart run example/main.dart
+dart run example/orchestration.dart
 ```

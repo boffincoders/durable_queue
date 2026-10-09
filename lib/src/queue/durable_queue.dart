@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
@@ -10,6 +11,7 @@ import '../registry/task_handler.dart';
 import '../registry/task_registry.dart';
 import '../retry/retry_policy.dart';
 import '../storage/queue_storage.dart';
+import '../task/dependency_failure_policy.dart';
 import '../task/durable_task.dart';
 import '../task/stored_task.dart';
 import '../task/task_context.dart';
@@ -186,77 +188,216 @@ final class DurableQueue {
   /// finishes. The task does not start until [start] is called.
   ///
   /// When [deduplicationKey] is set and another task with that key is
-  /// `pending`, `running`, or `retryScheduled`, this returns the existing id
-  /// and leaves that task unchanged. Completed, failed, and cancelled tasks
-  /// do not count, so the same key can be enqueued again after a terminal
-  /// state. The new payload is not merged into the existing task.
+  /// `pending`, `waiting`, `running`, or `retryScheduled`, this returns the
+  /// existing id and leaves that task unchanged. Completed, failed, and
+  /// cancelled tasks do not count, so the same key can be enqueued again
+  /// after a terminal state. The new payload is not merged into the existing
+  /// task.
   ///
   /// [idempotencyKey] is stored and passed to the handler on [TaskContext].
   ///
   /// [retryPolicy] defaults to [RetryPolicy.none].
   ///
+  /// [priority] orders eligible tasks: higher values start first, and tasks
+  /// with equal priority keep enqueue order. It does not pre-empt a handler
+  /// that is already running. Defaults to zero.
+  ///
+  /// [dependsOn] lists ids of stored tasks that must finish first. Until then
+  /// the task is [TaskStatus.waiting]. It becomes [TaskStatus.pending] when
+  /// every dependency is [TaskStatus.completed]. If a dependency fails, is
+  /// cancelled, or is missing, [onDependencyFailure] decides whether this
+  /// task is cancelled (the default), failed, or run anyway once every
+  /// dependency has finished.
+  ///
+  /// [group] is a label for [getTasks] and [cancelGroup].
+  ///
   /// Throws [UnknownTaskTypeException] if [task]'s type is not registered,
-  /// and [ArgumentError] if the payload is not JSON-encodable or a key is
-  /// empty.
+  /// [TaskNotFoundException] if a [dependsOn] id is not stored, and
+  /// [ArgumentError] if the payload is not JSON-encodable or a key, group,
+  /// or dependency id is empty.
   Future<String> enqueue(
     DurableTask task, {
     RetryPolicy? retryPolicy,
     String? deduplicationKey,
     String? idempotencyKey,
+    int priority = 0,
+    Iterable<String> dependsOn = const [],
+    DependencyFailurePolicy onDependencyFailure =
+        DependencyFailurePolicy.cancel,
+    String? group,
   }) async {
     _ensureOpen();
+    final request = _prepare(
+      task,
+      retryPolicy: retryPolicy,
+      deduplicationKey: deduplicationKey,
+      idempotencyKey: idempotencyKey,
+      priority: priority,
+      dependsOn: dependsOn,
+      onDependencyFailure: onDependencyFailure,
+      group: group,
+    );
+    final events = <QueueEvent>[];
+    final id = await _lock.synchronized(() => _store(request, events));
+    _emitAll(events);
+    if (events.isNotEmpty && _runState == QueueRunState.running) {
+      unawaited(_pump());
+    }
+    return id;
+  }
+
+  /// Persists [tasks] as a chain and returns their ids in order.
+  ///
+  /// Each task depends on the one before it, so they run one after another
+  /// even when [maxConcurrentTasks] is greater than one. The first task
+  /// depends on [dependsOn], if given. [retryPolicy], [priority], [group],
+  /// and [onDependencyFailure] apply to every task. With the default
+  /// [DependencyFailurePolicy.cancel], a step that fails or is cancelled
+  /// cancels the rest of the chain.
+  ///
+  /// Every task is validated before anything is stored, and the chain is
+  /// stored in one serialized operation. A storage error part-way through
+  /// can still leave the first steps stored; they are returned by
+  /// [getTasks] like any other task.
+  ///
+  /// Throws [ArgumentError] if [tasks] is empty, plus everything [enqueue]
+  /// throws.
+  Future<List<String>> enqueueChain(
+    List<DurableTask> tasks, {
+    RetryPolicy? retryPolicy,
+    int priority = 0,
+    Iterable<String> dependsOn = const [],
+    DependencyFailurePolicy onDependencyFailure =
+        DependencyFailurePolicy.cancel,
+    String? group,
+  }) async {
+    _ensureOpen();
+    if (tasks.isEmpty) {
+      throw ArgumentError.value(tasks, 'tasks', 'Must not be empty');
+    }
+    final requests = [
+      for (var i = 0; i < tasks.length; i++)
+        _prepare(
+          tasks[i],
+          retryPolicy: retryPolicy,
+          priority: priority,
+          onDependencyFailure: onDependencyFailure,
+          group: group,
+          dependsOn: i == 0 ? dependsOn : const [],
+        ),
+    ];
+    final events = <QueueEvent>[];
+    final ids = await _lock.synchronized(() async {
+      final stored = <String>[];
+      for (var i = 0; i < requests.length; i++) {
+        final request = i == 0
+            ? requests.first
+            : requests[i].withDependencies([stored.last]);
+        stored.add(await _store(request, events));
+      }
+      return stored;
+    });
+    _emitAll(events);
+    if (_runState == QueueRunState.running) unawaited(_pump());
+    return ids;
+  }
+
+  _EnqueueRequest _prepare(
+    DurableTask task, {
+    RetryPolicy? retryPolicy,
+    String? deduplicationKey,
+    String? idempotencyKey,
+    required int priority,
+    required Iterable<String> dependsOn,
+    required DependencyFailurePolicy onDependencyFailure,
+    required String? group,
+  }) {
     if (task.type.isEmpty) {
       throw ArgumentError.value(task.type, 'type', 'Must not be empty');
     }
     _rejectBlank(deduplicationKey, 'deduplicationKey');
     _rejectBlank(idempotencyKey, 'idempotencyKey');
+    _rejectBlank(group, 'group');
+    final dependencies = List<String>.unmodifiable(
+      LinkedHashSet<String>.of(dependsOn),
+    );
+    for (final dependency in dependencies) {
+      _rejectBlank(dependency, 'dependsOn');
+    }
     if (!_registry.contains(task.type)) {
       throw _registry.unknownType(task.type);
     }
+    return _EnqueueRequest(
+      type: task.type,
+      payload: _jsonPayload(task.toJson()),
+      retryPolicy: retryPolicy ?? RetryPolicy.none(),
+      deduplicationKey: deduplicationKey,
+      idempotencyKey: idempotencyKey,
+      priority: priority,
+      dependsOn: dependencies,
+      onDependencyFailure: onDependencyFailure,
+      group: group,
+    );
+  }
 
-    final payload = _jsonPayload(task.toJson());
-    final policy = retryPolicy ?? RetryPolicy.none();
-    final outcome = await _lock.synchronized(() async {
-      if (deduplicationKey != null) {
-        final existing = await _storage.findActiveByDeduplicationKey(
-          deduplicationKey,
-        );
-        if (existing != null) return _EnqueueOutcome(existing.id, null);
+  /// Stores one prepared task. Must run inside [_lock].
+  Future<String> _store(
+    _EnqueueRequest request,
+    List<QueueEvent> events,
+  ) async {
+    final key = request.deduplicationKey;
+    if (key != null) {
+      final existing = await _storage.findActiveByDeduplicationKey(key);
+      if (existing != null) return existing.id;
+    }
+    for (final dependency in request.dependsOn) {
+      if (await _storage.get(dependency) == null) {
+        throw TaskNotFoundException(dependency);
       }
+    }
 
-      final now = _clock.now();
-      final stored = StoredTask(
-        id: _idGenerator(),
-        type: task.type,
-        payload: payload,
-        status: TaskStatus.pending,
+    final id = _idGenerator();
+    final verdict = await _evaluate(
+      id,
+      request.dependsOn,
+      request.onDependencyFailure,
+      _direct,
+    );
+    final now = _clock.now();
+    final stored = _applyVerdict(
+      StoredTask(
+        id: id,
+        type: request.type,
+        payload: request.payload,
+        status: TaskStatus.waiting,
         attempts: 0,
-        retryPolicy: policy,
+        retryPolicy: request.retryPolicy,
         createdAt: now,
         updatedAt: now,
         sequence: await _allocateSequence(),
-        deduplicationKey: deduplicationKey,
-        idempotencyKey: idempotencyKey,
-      );
-      await _storage.save(stored);
-      return _EnqueueOutcome(
-        stored.id,
-        TaskEnqueued(
-          taskId: stored.id,
-          taskType: stored.type,
-          occurredAt: now,
-          deduplicationKey: deduplicationKey,
-          idempotencyKey: idempotencyKey,
-        ),
-      );
-    });
-
-    final event = outcome.event;
-    if (event != null) {
-      _emit(event);
-      if (_runState == QueueRunState.running) unawaited(_pump());
-    }
-    return outcome.id;
+        deduplicationKey: request.deduplicationKey,
+        idempotencyKey: request.idempotencyKey,
+        priority: request.priority,
+        dependsOn: request.dependsOn,
+        onDependencyFailure: request.onDependencyFailure,
+        group: request.group,
+      ),
+      verdict,
+      now,
+    );
+    await _storage.save(stored.task);
+    events.add(
+      TaskEnqueued(
+        taskId: id,
+        taskType: request.type,
+        occurredAt: now,
+        deduplicationKey: request.deduplicationKey,
+        idempotencyKey: request.idempotencyKey,
+      ),
+    );
+    final event = stored.event;
+    if (event != null) events.add(event);
+    return id;
   }
 
   /// Recovers interrupted work and starts executing eligible tasks.
@@ -267,6 +408,9 @@ final class DurableQueue {
   /// Otherwise it is scheduled using its retry policy. A running task whose
   /// cancellation was already requested is marked cancelled and is not
   /// retried.
+  ///
+  /// A recovered task that fails or is cancelled also settles the tasks
+  /// waiting on it.
   ///
   /// Recovery errors propagate and leave the queue idle so this call can be
   /// retried. Successfully recovered records stay updated.
@@ -289,8 +433,7 @@ final class DurableQueue {
         );
         if (running.isEmpty) break;
         for (final task in running) {
-          final event = await _recoverInterrupted(task);
-          if (event != null) _emit(event);
+          _emitAll(await _commit(_recoverInterrupted(task), _direct));
         }
       }
       _runState = QueueRunState.running;
@@ -358,8 +501,9 @@ final class DurableQueue {
 
   /// Cancels [id].
   ///
-  /// * `pending` and `retryScheduled` become [TaskStatus.cancelled] and will
-  ///   not start.
+  /// * `pending`, `waiting`, and `retryScheduled` become
+  ///   [TaskStatus.cancelled] and will not start. Tasks waiting on this one
+  ///   follow their [DependencyFailurePolicy].
   /// * `running` is left running. [TaskContext.isCancellationRequested]
   ///   becomes true. If the handler later throws, including
   ///   [TaskCancelledException], the task is cancelled and not retried. If
@@ -370,42 +514,87 @@ final class DurableQueue {
   /// Throws [TaskNotFoundException] when [id] is not stored.
   Future<void> cancel(String id) async {
     _ensureOpen();
-    final event = await _lock.synchronized(() async {
+    final events = <QueueEvent>[];
+    await _lock.synchronized(() async {
       final task = await _storage.get(id);
       if (task == null) throw TaskNotFoundException(id);
-      final now = _clock.now();
-      switch (task.status) {
-        case TaskStatus.pending:
-        case TaskStatus.retryScheduled:
-          await _storage.update(
-            task.copyWith(
-              status: TaskStatus.cancelled,
-              updatedAt: now,
-              nextAttemptAt: null,
-              cancelRequested: false,
-            ),
-          );
-          return TaskCancelled(
+      await _cancelLocked(task, events);
+    });
+    _afterPublicChange(events);
+  }
+
+  /// Cancels every active task in [group] and returns how many were
+  /// affected.
+  ///
+  /// Each task is handled as by [cancel]: queued and waiting tasks become
+  /// [TaskStatus.cancelled] immediately, and running tasks get a
+  /// cancellation request. Terminal tasks are not counted. Dependents of
+  /// cancelled tasks follow their [DependencyFailurePolicy], even when they
+  /// are outside [group].
+  Future<int> cancelGroup(String group) async {
+    _ensureOpen();
+    _rejectBlank(group, 'group');
+    final events = <QueueEvent>[];
+    final count = await _lock.synchronized(() async {
+      var affected = 0;
+      for (final listed in await _storage.getByGroup(group)) {
+        // An earlier cancellation in this loop may have cascaded here.
+        final current = await _storage.get(listed.id);
+        if (current == null) continue;
+        if (await _cancelLocked(current, events)) affected++;
+      }
+      return affected;
+    });
+    _afterPublicChange(events);
+    return count;
+  }
+
+  /// Cancels or requests cancellation of [task]. Must run inside [_lock].
+  ///
+  /// Returns whether the task was active.
+  Future<bool> _cancelLocked(StoredTask task, List<QueueEvent> events) async {
+    final now = _clock.now();
+    switch (task.status) {
+      case TaskStatus.pending:
+      case TaskStatus.waiting:
+      case TaskStatus.retryScheduled:
+        final cancelled = _Resolved(
+          task.copyWith(
+            status: TaskStatus.cancelled,
+            updatedAt: now,
+            nextAttemptAt: null,
+            cancelRequested: false,
+          ),
+          TaskCancelled(
             taskId: task.id,
             taskType: task.type,
             occurredAt: now,
             wasRunning: false,
+          ),
+        );
+        events.addAll(await _commit(cancelled, _direct));
+        return true;
+      case TaskStatus.running:
+        if (!task.cancelRequested) {
+          await _storage.update(
+            task.copyWith(cancelRequested: true, updatedAt: now),
           );
-        case TaskStatus.running:
-          if (!task.cancelRequested) {
-            await _storage.update(
-              task.copyWith(cancelRequested: true, updatedAt: now),
-            );
-          }
-          _cancelRequested.add(task.id);
-          return null;
-        case TaskStatus.completed:
-        case TaskStatus.failed:
-        case TaskStatus.cancelled:
-          return null;
-      }
-    });
-    if (event != null) _emit(event);
+        }
+        _cancelRequested.add(task.id);
+        return true;
+      case TaskStatus.completed:
+      case TaskStatus.failed:
+      case TaskStatus.cancelled:
+        return false;
+    }
+  }
+
+  /// Emits [events] and lets a running queue pick up released work.
+  void _afterPublicChange(List<QueueEvent> events) {
+    _emitAll(events);
+    if (events.isNotEmpty && _runState == QueueRunState.running) {
+      unawaited(_pump());
+    }
   }
 
   /// Returns the stored record for [id], or null.
@@ -415,10 +604,11 @@ final class DurableQueue {
 
   /// Returns stored tasks, oldest first.
   ///
-  /// Pass [status] to restrict the result. Without it, every task is
-  /// returned.
-  Future<List<StoredTask>> getTasks({TaskStatus? status}) {
+  /// Pass [status] and/or [group] to restrict the result. Without either,
+  /// every task is returned.
+  Future<List<StoredTask>> getTasks({TaskStatus? status, String? group}) {
     return _lock.synchronized(() {
+      if (group != null) return _storage.getByGroup(group, status: status);
       if (status == null) return _storage.getAll();
       return _storage.getByStatus(status);
     });
@@ -427,10 +617,12 @@ final class DurableQueue {
   /// Puts a [TaskStatus.failed] or [TaskStatus.cancelled] task back in the
   /// queue and returns its id.
   ///
-  /// The task keeps its id, payload, keys, `createdAt`, and `sequence`, so it
-  /// runs in its original order relative to other stored tasks. It becomes
-  /// [TaskStatus.pending] with a fresh attempt budget: `attempts` resets to
-  /// zero. [StoredTask.lastFailure] is kept for reference until the next
+  /// The task keeps its id, payload, keys, priority, group, dependencies,
+  /// `createdAt`, and `sequence`, so it runs in its original order relative
+  /// to other stored tasks. It becomes [TaskStatus.pending], or
+  /// [TaskStatus.waiting] while a dependency is still active, with a fresh
+  /// attempt budget: `attempts` resets to zero. Tasks that were cancelled
+  /// because this one failed are not revived; retry them as well. [StoredTask.lastFailure] is kept for reference until the next
   /// attempt replaces or clears it. Pass [retryPolicy] to replace the stored
   /// policy.
   ///
@@ -439,8 +631,10 @@ final class DurableQueue {
   ///
   /// Throws [TaskNotFoundException] when [id] is not stored,
   /// [UnknownTaskTypeException] when its type is not registered, and
-  /// [StateError] when the task is not failed or cancelled, or when another
-  /// active task already holds its deduplication key.
+  /// [StateError] when the task is not failed or cancelled, when another
+  /// active task already holds its deduplication key, or when one of its
+  /// dependencies did not complete and its policy is not
+  /// [DependencyFailurePolicy.run]. Retry that dependency first.
   Future<String> retry(String id, {RetryPolicy? retryPolicy}) async {
     _ensureOpen();
     final event = await _lock.synchronized(() async {
@@ -467,10 +661,27 @@ final class DurableQueue {
         }
       }
 
+      final verdict = await _evaluate(
+        task.id,
+        task.dependsOn,
+        task.onDependencyFailure,
+        _direct,
+      );
+      final blocker = verdict.blocker;
+      if (blocker != null) {
+        throw StateError(
+          'Cannot retry task "$id": ${blocker.dependencyId} is '
+          '${blocker.dependencyStatus?.name ?? 'missing'}. '
+          'Retry that dependency first.',
+        );
+      }
+
       final now = _clock.now();
       await _storage.update(
         task.copyWith(
-          status: TaskStatus.pending,
+          status: verdict.kind == _VerdictKind.ready
+              ? TaskStatus.pending
+              : TaskStatus.waiting,
           attempts: 0,
           retryPolicy: retryPolicy,
           updatedAt: now,
@@ -499,7 +710,8 @@ final class DurableQueue {
   /// first. No event is emitted.
   ///
   /// Throws [TaskNotFoundException] when [id] is not stored and [StateError]
-  /// when the task is still pending, running, or retry-scheduled.
+  /// when the task is still active, or when a waiting task still depends on
+  /// it.
   Future<void> delete(String id) async {
     _ensureOpen();
     await _lock.synchronized(() async {
@@ -509,6 +721,13 @@ final class DurableQueue {
         throw StateError(
           'Only finished tasks can be deleted. '
           'Task "$id" is ${task.status.name}.',
+        );
+      }
+      final dependents = await _storage.getWaitingDependents(id);
+      if (dependents.isNotEmpty) {
+        throw StateError(
+          'Task "$id" cannot be deleted while task '
+          '"${dependents.first.id}" is waiting on it.',
         );
       }
       await _storage.delete(id);
@@ -522,6 +741,9 @@ final class DurableQueue {
   /// [ArgumentError]. When [olderThan] is set, only tasks whose
   /// [StoredTask.updatedAt] is at least that long before the queue clock's
   /// current time are removed.
+  ///
+  /// Tasks that a waiting task still depends on are skipped, so a dependent
+  /// never loses the record it is waiting for.
   ///
   /// Matching records are loaded with [QueueStorage.getByStatus] and
   /// deleted one at a time while the queue lock is held. No events are
@@ -552,6 +774,9 @@ final class DurableQueue {
         final tasks = await _storage.getByStatus(status);
         for (final task in tasks) {
           if (cutoff != null && task.updatedAt.isAfter(cutoff)) continue;
+          if ((await _storage.getWaitingDependents(task.id)).isNotEmpty) {
+            continue;
+          }
           await _storage.delete(task.id);
           removed++;
         }
@@ -562,8 +787,9 @@ final class DurableQueue {
 
   /// Stops the queue, then closes [events] and [storageErrors].
   ///
-  /// Waits like [stop]. Afterwards [register], [enqueue], [start], [cancel],
-  /// [retry], [delete], and [purge] throw [StateError]. [getTask] and
+  /// Waits like [stop]. Afterwards [register], [enqueue], [enqueueChain],
+  /// [start], [cancel], [cancelGroup], [retry], [delete], and [purge] throw
+  /// [StateError]. [getTask] and
   /// [getTasks] keep working. The storage is not closed; it belongs to the
   /// caller. Calling [close] again returns the same future.
   Future<void> close() => _closing ??= _close();
@@ -579,22 +805,182 @@ final class DurableQueue {
     if (_closed) throw StateError('DurableQueue is closed');
   }
 
-  Future<QueueEvent?> _recoverInterrupted(StoredTask task) async {
+  /// Checks [dependsOn] for a task with [taskId] and [policy].
+  ///
+  /// [overlay] holds statuses decided in this operation but not yet written.
+  Future<_Verdict> _evaluate(
+    String taskId,
+    List<String> dependsOn,
+    DependencyFailurePolicy policy,
+    _StorageIo io, [
+    Map<String, TaskStatus> overlay = const {},
+  ]) async {
+    var allFinished = true;
+    DependencyFailedException? blocker;
+    for (final id in dependsOn) {
+      final status =
+          overlay[id] ?? (await io(() => _storage.get(id), 'get'))?.status;
+      if (status == TaskStatus.completed) continue;
+      if (status == null || status.isTerminal) {
+        blocker ??= DependencyFailedException(
+          taskId: taskId,
+          dependencyId: id,
+          dependencyStatus: status,
+        );
+        if (policy != DependencyFailurePolicy.run) break;
+        continue;
+      }
+      allFinished = false;
+    }
+    if (blocker != null) {
+      switch (policy) {
+        case DependencyFailurePolicy.cancel:
+          return _Verdict(_VerdictKind.cancel, blocker);
+        case DependencyFailurePolicy.fail:
+          return _Verdict(_VerdictKind.fail, blocker);
+        case DependencyFailurePolicy.run:
+          break;
+      }
+    }
+    return allFinished ? _Verdict.ready : _Verdict.wait;
+  }
+
+  /// Applies [verdict] to a task that is, or is about to be, waiting.
+  _Resolved _applyVerdict(StoredTask task, _Verdict verdict, DateTime now) {
+    switch (verdict.kind) {
+      case _VerdictKind.wait:
+        return _Resolved(
+          task.status == TaskStatus.waiting
+              ? task
+              : task.copyWith(status: TaskStatus.waiting, updatedAt: now),
+          null,
+        );
+      case _VerdictKind.ready:
+        return _Resolved(
+          task.copyWith(
+            status: TaskStatus.pending,
+            updatedAt: now,
+            nextAttemptAt: null,
+          ),
+          null,
+        );
+      case _VerdictKind.cancel:
+      case _VerdictKind.fail:
+        final failure = TaskFailure(
+          error: verdict.blocker.toString(),
+          stackTrace: null,
+          failedAt: now,
+          attempt: task.attempts,
+        );
+        final cancel = verdict.kind == _VerdictKind.cancel;
+        return _Resolved(
+          task.copyWith(
+            status: cancel ? TaskStatus.cancelled : TaskStatus.failed,
+            updatedAt: now,
+            nextAttemptAt: null,
+            lastFailure: failure,
+            cancelRequested: false,
+          ),
+          cancel
+              ? TaskCancelled(
+                  taskId: task.id,
+                  taskType: task.type,
+                  occurredAt: now,
+                  wasRunning: false,
+                )
+              : TaskFailed(
+                  taskId: task.id,
+                  taskType: task.type,
+                  occurredAt: now,
+                  failure: failure,
+                ),
+        );
+    }
+  }
+
+  /// Writes [root] together with every change it causes in waiting tasks,
+  /// and returns the events in causal order.
+  ///
+  /// When [root] is terminal, its dependents are released, cancelled, or
+  /// failed, cascading through their own dependents. Those records are
+  /// written deepest first and [root] last, so a crash part-way through can
+  /// never leave a task waiting behind a dependency that already finished:
+  /// the unfinished part of the cascade is redone when [root] itself is
+  /// recovered or finishes again. Must run inside [_lock].
+  Future<List<QueueEvent>> _commit(_Resolved root, _StorageIo io) async {
+    final cascade = root.task.status.isTerminal
+        ? await _planDependents(root.task.id, root.task.status, io)
+        : const <_Resolved>[];
+    for (final step in cascade.reversed) {
+      await io(() => _storage.update(step.task), 'update');
+    }
+    await io(() => _storage.update(root.task), 'update');
+    return [?root.event, for (final step in cascade) ?step.event];
+  }
+
+  /// Decides, without writing, how tasks waiting on [id] change when [id]
+  /// moves to the terminal [status]. Returns changes in discovery order:
+  /// every task appears after the dependency that released it.
+  Future<List<_Resolved>> _planDependents(
+    String id,
+    TaskStatus status,
+    _StorageIo io,
+  ) async {
+    final overlay = <String, TaskStatus>{id: status};
+    final planned = <_Resolved>[];
+    final work = [id];
+    final now = _clock.now();
+    while (work.isNotEmpty) {
+      final finished = work.removeLast();
+      final dependents = await io(
+        () => _storage.getWaitingDependents(finished),
+        'getWaitingDependents',
+      );
+      for (final listed in dependents) {
+        if (overlay.containsKey(listed.id)) continue;
+        final current = await io(() => _storage.get(listed.id), 'get');
+        if (current == null || current.status != TaskStatus.waiting) continue;
+        final verdict = await _evaluate(
+          current.id,
+          current.dependsOn,
+          current.onDependencyFailure,
+          io,
+          overlay,
+        );
+        if (verdict.kind == _VerdictKind.wait) continue;
+        final resolved = _applyVerdict(current, verdict, now);
+        planned.add(resolved);
+        overlay[current.id] = resolved.task.status;
+        if (resolved.task.status.isTerminal) work.add(current.id);
+      }
+    }
+    return planned;
+  }
+
+  void _emitAll(List<QueueEvent> events) {
+    for (final event in events) {
+      _emit(event);
+    }
+  }
+
+  /// Decides the record and event for a task left running by a previous
+  /// process. Writes nothing; [start] commits the result.
+  _Resolved _recoverInterrupted(StoredTask task) {
     final now = _clock.now();
     if (task.cancelRequested) {
-      await _storage.update(
+      _cancelRequested.remove(task.id);
+      return _Resolved(
         task.copyWith(
           status: TaskStatus.cancelled,
           updatedAt: now,
           nextAttemptAt: null,
         ),
-      );
-      _cancelRequested.remove(task.id);
-      return TaskCancelled(
-        taskId: task.id,
-        taskType: task.type,
-        occurredAt: now,
-        wasRunning: true,
+        TaskCancelled(
+          taskId: task.id,
+          taskType: task.type,
+          occurredAt: now,
+          wasRunning: true,
+        ),
       );
     }
 
@@ -611,7 +997,7 @@ final class DurableQueue {
         : task.copyWith(attempts: attempts);
 
     if (attempts >= task.retryPolicy.maxAttempts) {
-      await _storage.update(
+      return _Resolved(
         normalized.copyWith(
           status: TaskStatus.failed,
           updatedAt: now,
@@ -619,35 +1005,35 @@ final class DurableQueue {
           lastFailure: failure,
           cancelRequested: false,
         ),
-      );
-      return TaskFailed(
-        taskId: task.id,
-        taskType: task.type,
-        occurredAt: now,
-        failure: failure,
+        TaskFailed(
+          taskId: task.id,
+          taskType: task.type,
+          occurredAt: now,
+          failure: failure,
+        ),
       );
     }
 
+    // The worker is still idle here; the first pump arms the wake-up timer.
     final delay = task.retryPolicy.delayAfter(attempts, _nextFraction());
     final nextAttemptAt = now.add(delay);
-    await _storage.update(
+    return _Resolved(
       normalized.copyWith(
         status: TaskStatus.retryScheduled,
         updatedAt: now,
         nextAttemptAt: nextAttemptAt,
         lastFailure: failure,
       ),
-    );
-    _considerWake(nextAttemptAt);
-    return TaskRetryScheduled(
-      taskId: task.id,
-      taskType: task.type,
-      occurredAt: now,
-      attempt: attempts,
-      maxAttempts: task.retryPolicy.maxAttempts,
-      delay: delay,
-      nextAttemptAt: nextAttemptAt,
-      error: failure.error,
+      TaskRetryScheduled(
+        taskId: task.id,
+        taskType: task.type,
+        occurredAt: now,
+        attempt: attempts,
+        maxAttempts: task.retryPolicy.maxAttempts,
+        delay: delay,
+        nextAttemptAt: nextAttemptAt,
+        error: failure.error,
+      ),
     );
   }
 
@@ -783,7 +1169,7 @@ final class DurableQueue {
   }
 
   Future<void> _markCompleted(StoredTask claimed) async {
-    final event = await _lock.synchronized(
+    final events = await _lock.synchronized(
       () => _transition(claimed, (current, now, _) {
         return _Transition(
           current.copyWith(
@@ -802,7 +1188,7 @@ final class DurableQueue {
         );
       }),
     );
-    if (event != null) _emit(event);
+    _emitAll(events);
   }
 
   Future<void> _markCancelled(
@@ -810,7 +1196,7 @@ final class DurableQueue {
     Object error,
     StackTrace stackTrace,
   ) async {
-    final event = await _lock.synchronized(
+    final events = await _lock.synchronized(
       () => _transition(claimed, (current, now, failureOf) {
         return _Transition(
           current.copyWith(
@@ -829,7 +1215,7 @@ final class DurableQueue {
         );
       }),
     );
-    if (event != null) _emit(event);
+    _emitAll(events);
   }
 
   Future<void> _failPermanent(
@@ -837,7 +1223,7 @@ final class DurableQueue {
     Object error,
     StackTrace stackTrace,
   ) async {
-    final event = await _lock.synchronized(
+    final events = await _lock.synchronized(
       () => _transition(claimed, (current, now, failureOf) {
         if (current.cancelRequested || _cancelRequested.contains(current.id)) {
           return _cancelledTransition(current, now, error, stackTrace);
@@ -859,7 +1245,7 @@ final class DurableQueue {
         );
       }),
     );
-    if (event != null) _emit(event);
+    _emitAll(events);
   }
 
   Future<void> _handleFailure(
@@ -868,7 +1254,7 @@ final class DurableQueue {
     Object error,
     StackTrace stackTrace,
   ) async {
-    final event = await _lock.synchronized(
+    final events = await _lock.synchronized(
       () => _transition(claimed, (current, now, failureOf) {
         if (current.cancelRequested || _cancelRequested.contains(current.id)) {
           return _cancelledTransition(current, now, error, stackTrace);
@@ -921,7 +1307,7 @@ final class DurableQueue {
         );
       }),
     );
-    if (event != null) _emit(event);
+    _emitAll(events);
   }
 
   _Transition _cancelledTransition(
@@ -947,7 +1333,7 @@ final class DurableQueue {
     );
   }
 
-  Future<QueueEvent?> _transition(
+  Future<List<QueueEvent>> _transition(
     StoredTask claimed,
     _Transition Function(
       StoredTask current,
@@ -957,16 +1343,21 @@ final class DurableQueue {
     change,
   ) async {
     final current = await _retryStorage(() => _storage.get(claimed.id), 'get');
-    if (current == null || current.status != TaskStatus.running) return null;
+    if (current == null || current.status != TaskStatus.running) {
+      return const [];
+    }
     final now = _clock.now();
     TaskFailure failureOf(Object error, StackTrace stackTrace) {
       return _failure(current, error, stackTrace, now);
     }
 
     final transition = change(current, now, failureOf);
-    await _retryStorage(() => _storage.update(transition.task), 'update');
+    final events = await _commit(
+      _Resolved(transition.task, transition.event),
+      _retryStorage,
+    );
     _cancelRequested.remove(current.id);
-    return transition.event;
+    return events;
   }
 
   bool _allowsRetry(
@@ -1129,16 +1520,80 @@ void _rejectBlank(String? value, String name) {
   }
 }
 
-final class _EnqueueOutcome {
-  _EnqueueOutcome(this.id, this.event);
-
-  final String id;
-  final QueueEvent? event;
-}
-
 final class _Transition {
   _Transition(this.task, this.event);
 
   final StoredTask task;
   final QueueEvent event;
 }
+
+final class _EnqueueRequest {
+  _EnqueueRequest({
+    required this.type,
+    required this.payload,
+    required this.retryPolicy,
+    required this.deduplicationKey,
+    required this.idempotencyKey,
+    required this.priority,
+    required this.dependsOn,
+    required this.onDependencyFailure,
+    required this.group,
+  });
+
+  final String type;
+  final Map<String, dynamic> payload;
+  final RetryPolicy retryPolicy;
+  final String? deduplicationKey;
+  final String? idempotencyKey;
+  final int priority;
+  final List<String> dependsOn;
+  final DependencyFailurePolicy onDependencyFailure;
+  final String? group;
+
+  _EnqueueRequest withDependencies(List<String> dependencies) {
+    return _EnqueueRequest(
+      type: type,
+      payload: payload,
+      retryPolicy: retryPolicy,
+      deduplicationKey: deduplicationKey,
+      idempotencyKey: idempotencyKey,
+      priority: priority,
+      dependsOn: List<String>.unmodifiable(dependencies),
+      onDependencyFailure: onDependencyFailure,
+      group: group,
+    );
+  }
+}
+
+enum _VerdictKind { ready, wait, cancel, fail }
+
+/// Outcome of checking a task's dependencies.
+final class _Verdict {
+  const _Verdict(this.kind, [this.blocker]);
+
+  static const ready = _Verdict(_VerdictKind.ready);
+  static const wait = _Verdict(_VerdictKind.wait);
+
+  final _VerdictKind kind;
+
+  /// The dependency that did not complete, for [_VerdictKind.cancel] and
+  /// [_VerdictKind.fail].
+  final DependencyFailedException? blocker;
+}
+
+/// A record to write and the event to emit after the write, if any.
+final class _Resolved {
+  const _Resolved(this.task, this.event);
+
+  final StoredTask task;
+  final QueueEvent? event;
+}
+
+/// Runs one storage operation. Worker paths retry; public calls do not.
+typedef _StorageIo = Future<T> Function<T>(
+  Future<T> Function() operation,
+  String name,
+);
+
+Future<T> _direct<T>(Future<T> Function() operation, String name) =>
+    operation();

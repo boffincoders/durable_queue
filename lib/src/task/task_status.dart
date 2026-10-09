@@ -1,11 +1,13 @@
 /// Explicit lifecycle of a persisted task.
 ///
 /// ```text
+/// waiting → pending              (every dependency completed)
+/// waiting → cancelled or failed  (a dependency did not complete)
 /// pending → running → completed
 ///                  ↘ retryScheduled → running
 ///                  ↘ failed
-/// pending or retryScheduled → cancelled
-/// failed or cancelled → pending   (DurableQueue.retry)
+/// pending, waiting, or retryScheduled → cancelled
+/// failed or cancelled → pending or waiting   (DurableQueue.retry)
 /// ```
 enum TaskStatus {
   /// Stored and eligible to start when the queue is running.
@@ -24,9 +26,14 @@ enum TaskStatus {
   failed,
 
   /// The task was cancelled before it finished.
-  cancelled;
+  cancelled,
 
-  /// Whether the task can still run: [pending], [running], or
+  /// Stored, but blocked until the tasks it depends on have finished.
+  ///
+  /// Declared last so that the indexes of earlier values are unchanged.
+  waiting;
+
+  /// Whether the task can still run: [pending], [waiting], [running], or
   /// [retryScheduled].
   bool get isActive => !isTerminal;
 

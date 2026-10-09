@@ -56,4 +56,10 @@ final class ProbeStorage implements QueueStorage {
     key,
     () => inner.findActiveByDeduplicationKey(key),
   );
+  @override
+  Future<List<StoredTask>> getWaitingDependents(String id) =>
+      _call('getWaitingDependents', id, () => inner.getWaitingDependents(id));
+  @override
+  Future<List<StoredTask>> getByGroup(String group, {TaskStatus? status}) =>
+      _call('getByGroup', group, () => inner.getByGroup(group, status: status));
 }

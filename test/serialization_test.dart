@@ -31,6 +31,10 @@ void main() {
         attempt: 2,
       ),
       cancelRequested: true,
+      priority: -2,
+      dependsOn: ['task-0'],
+      onDependencyFailure: DependencyFailurePolicy.fail,
+      group: 'uploads',
     );
 
     final restored = StoredTask.fromJson(original.toJson());
@@ -39,6 +43,52 @@ void main() {
     expect(restored.retryPolicy, original.retryPolicy);
     expect(restored.lastFailure?.attempt, 2);
     expect(restored.cancelRequested, isTrue);
+    expect(restored.priority, -2);
+    expect(restored.dependsOn, ['task-0']);
+    expect(restored.onDependencyFailure, DependencyFailurePolicy.fail);
+    expect(restored.group, 'uploads');
+  });
+
+  test('records written by 0.2.0 load with orchestration defaults', () {
+    final legacy = storedTask(id: 'old').toJson()
+      ..remove('priority')
+      ..remove('dependsOn')
+      ..remove('onDependencyFailure')
+      ..remove('group');
+
+    final restored = StoredTask.fromJson(legacy);
+
+    expect(restored.priority, 0);
+    expect(restored.dependsOn, isEmpty);
+    expect(restored.onDependencyFailure, DependencyFailurePolicy.cancel);
+    expect(restored.group, isNull);
+  });
+
+  test('invalid orchestration fields are rejected', () {
+    final json = storedTask(id: 'a').toJson();
+    expect(
+      () => StoredTask.fromJson({...json, 'priority': '1'}),
+      throwsFormatException,
+    );
+    expect(
+      () => StoredTask.fromJson({
+        ...json,
+        'dependsOn': [1],
+      }),
+      throwsFormatException,
+    );
+    expect(
+      () => StoredTask.fromJson({...json, 'onDependencyFailure': 'skip'}),
+      throwsFormatException,
+    );
+    expect(() => storedTask(id: 'a', dependsOn: ['a']), throwsArgumentError);
+    expect(() => storedTask(id: 'a', group: ''), throwsArgumentError);
+  });
+
+  test('dependsOn is unmodifiable and de-duplicated', () {
+    final task = storedTask(id: 'a', dependsOn: ['x', 'y', 'x']);
+    expect(task.dependsOn, ['x', 'y']);
+    expect(() => task.dependsOn.add('z'), throwsUnsupportedError);
   });
 
   test('malformed stored task json is rejected', () {

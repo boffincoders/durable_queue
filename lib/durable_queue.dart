@@ -13,6 +13,7 @@ export 'src/registry/task_handler.dart';
 export 'src/retry/retry_policy.dart';
 export 'src/storage/memory_queue_storage.dart';
 export 'src/storage/queue_storage.dart';
+export 'src/task/dependency_failure_policy.dart';
 export 'src/task/durable_task.dart';
 export 'src/task/stored_task.dart';
 export 'src/task/task_context.dart';

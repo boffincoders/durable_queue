@@ -1,3 +1,9 @@
+/// @docImport 'task/dependency_failure_policy.dart';
+/// @docImport 'task/task_failure.dart';
+library;
+
+import 'task/task_status.dart';
+
 /// Thrown when an operation targets a task id that is not in storage.
 final class TaskNotFoundException implements Exception {
   /// Creates an exception for [taskId].
@@ -100,4 +106,35 @@ final class QueueStorageFailure {
 
   /// Number of consecutive failures for this particular operation.
   final int attempt;
+}
+
+/// Recorded when a waiting task cannot run because a dependency did not
+/// complete.
+///
+/// The queue does not throw this to application code. It is stored as the
+/// [TaskFailure] of a dependent task that was cancelled or failed by its
+/// [DependencyFailurePolicy].
+final class DependencyFailedException implements Exception {
+  /// Creates an exception for [taskId] blocked by [dependencyId].
+  const DependencyFailedException({
+    required this.taskId,
+    required this.dependencyId,
+    required this.dependencyStatus,
+  });
+
+  /// The dependent task that will not run.
+  final String taskId;
+
+  /// The dependency that did not complete.
+  final String dependencyId;
+
+  /// Final status of the dependency, or null when it is no longer stored.
+  final TaskStatus? dependencyStatus;
+
+  @override
+  String toString() {
+    final status = dependencyStatus?.name ?? 'missing';
+    return 'DependencyFailedException: task "$taskId" depends on '
+        '"$dependencyId", which is $status';
+  }
 }

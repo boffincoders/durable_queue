@@ -19,7 +19,12 @@ import '../task/task_status.dart';
 /// * [getByStatus] uses that same order.
 /// * [getAll] returns every record in that same order.
 /// * [findActiveByDeduplicationKey] returns the oldest task whose key matches
-///   and whose status is `pending`, `running`, or `retryScheduled`.
+///   and whose status is `pending`, `waiting`, `running`, or
+///   `retryScheduled`.
+/// * [getNextReady] orders by highest [StoredTask.priority] first, then the
+///   order above. See [compareReadyTasks].
+/// * [getWaitingDependents] and [getByGroup] use the createdAt, sequence, id
+///   order.
 /// * Each method is atomic. Callers must not observe a partially written task.
 /// * Deduplication check-and-insert is performed by the queue, which
 ///   serializes enqueue calls. Adapters do not need a multi-method transaction.
@@ -39,11 +44,13 @@ abstract interface class QueueStorage {
   /// Recovery repeatedly requests bounded batches of running tasks.
   Future<List<StoredTask>> getByStatus(TaskStatus status, {int? limit});
 
-  /// Returns the oldest eligible pending or retry-scheduled task, or null.
+  /// Returns the next eligible pending or retry-scheduled task, or null.
   ///
   /// Eligible means `nextAttemptAt` is null or at/before [now]. Order by
-  /// createdAt, sequence, then id across both statuses. This is a bounded
-  /// query: adapters should use indexes, not materialize the entire backlog.
+  /// highest [StoredTask.priority] first, then createdAt, sequence, and id,
+  /// across both statuses ([compareReadyTasks]). [TaskStatus.waiting] tasks
+  /// are never eligible. This is a bounded query: adapters should use
+  /// indexes, not materialize the entire backlog.
   Future<StoredTask?> getNextReady(DateTime now);
 
   /// Earliest non-null nextAttemptAt among pending and retry-scheduled tasks.
@@ -61,9 +68,22 @@ abstract interface class QueueStorage {
 
   /// Returns the oldest non-terminal task stored under [key], or null.
   ///
-  /// Non-terminal means [TaskStatus.pending], [TaskStatus.running], or
-  /// [TaskStatus.retryScheduled].
+  /// Non-terminal means [TaskStatus.pending], [TaskStatus.waiting],
+  /// [TaskStatus.running], or [TaskStatus.retryScheduled].
   Future<StoredTask?> findActiveByDeduplicationKey(String key);
+
+  /// Returns [TaskStatus.waiting] tasks whose [StoredTask.dependsOn] contains
+  /// [id], oldest first.
+  ///
+  /// The queue calls this when [id] reaches a terminal state, and before
+  /// deleting [id]. Adapters should index dependency edges of waiting tasks
+  /// rather than scan every record.
+  Future<List<StoredTask>> getWaitingDependents(String id);
+
+  /// Returns tasks whose [StoredTask.group] equals [group], oldest first.
+  ///
+  /// When [status] is supplied, only tasks in that status are returned.
+  Future<List<StoredTask>> getByGroup(String group, {TaskStatus? status});
 
   /// Replaces the stored record for `task.id`.
   ///
