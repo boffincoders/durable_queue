@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  durable_queue:
+    name: durable_queue (Dart ${{ matrix.sdk }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sdk: ['3.13.0', stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      - run: dart test
+      - run: dart pub publish --dry-run

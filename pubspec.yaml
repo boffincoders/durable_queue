@@ -1,18 +1,11 @@
-name: durable_queue
-description: A backend-agnostic persistent task queue for Dart and Flutter with retries, backoff, concurrency control, and recovery.
-version: 0.3.1
-repository: https://github.com/boffincoders/durable_queue
-issue_tracker: https://github.com/boffincoders/durable_queue/issues
-topics:
-  - queue
-  - retry
-  - offline
-  - background
-  - persistence
+# Workspace root for the durable_queue packages. Not published.
+#
+# Run `dart pub get` here once; it resolves every package listed below.
+name: durable_queue_workspace
+publish_to: none
 
 environment:
   sdk: ^3.13.0
 
-dev_dependencies:
-  lints: ^6.1.0
-  test: ^1.32.0
+workspace:
+  - packages/durable_queue

@@ -1,0 +1,36 @@
+title: "[Idea] "
+labels: ["idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Describe the problem first; the solution can come later.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The app scenario, and where durable_queue gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: An API sketch, a storage backend, or a behavior change.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Storage adapter (SQLite, Hive, Isar, other)
+        - Retries and scheduling
+        - Dependencies, chains, groups
+        - Flutter integration
+        - Documentation or examples
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: durable_queue, Dart, and Flutter versions

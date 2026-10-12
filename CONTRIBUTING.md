@@ -13,8 +13,16 @@ Thanks for helping. `durable_queue` is a small execution engine, and the goal is
 ```sh
 git clone https://github.com/boffincoders/durable_queue.git
 cd durable_queue
-dart pub get
+dart pub get   # resolves every package in the workspace
 ```
+
+The repository is a Dart pub workspace. Each published package lives in `packages/`:
+
+| Folder | Package |
+|---|---|
+| `packages/durable_queue` | Core engine, pure Dart |
+
+Integration packages (SQLite, Flutter, Dio, Hive) will be added next to it. Run the checks below from inside the package you changed.
 
 ## Checks
 
@@ -29,23 +37,23 @@ dart test
 ## Pull requests
 
 * Keep each pull request to one change, with tests.
-* Add an entry under the next version in `CHANGELOG.md`.
+* Add an entry under the next version in that package's `CHANGELOG.md`.
 * Document behavior users can observe in the README and in the public API docs.
 * Call out breaking changes explicitly: new `TaskStatus` values, `QueueStorage` methods, or changed ordering all affect adapter authors.
 
 ## Engine rules
 
 * Time goes through `QueueClock`. Tests use `FakeQueueClock` instead of real delays.
-* Worker queries stay bounded. Never load the whole queue to claim work or recover; `test/scalability_test.dart` enforces this.
+* Worker queries stay bounded. Never load the whole queue to claim work or recover; `packages/durable_queue/test/scalability_test.dart` enforces this.
 * Do not promise exactly-once execution or execution after the process has been killed.
 
 ## Storage adapters
 
 Adapters are separate packages (for example `durable_queue_<backend>`). To build one:
 
-1. Implement `QueueStorage` following [STORAGE.md](STORAGE.md).
-2. Copy `test/storage_contract.dart` and run `queueStorageContractTests` against your adapter.
-3. Use `example/json_file_storage.dart` as a working reference.
+1. Implement `QueueStorage` following [STORAGE.md](packages/durable_queue/STORAGE.md).
+2. Copy `packages/durable_queue/test/storage_contract.dart` and run `queueStorageContractTests` against your adapter.
+3. Use `packages/durable_queue/example/json_file_storage.dart` as a working reference.
 4. Announce it in Discussions so it can be listed in the README.
 
 ## License
