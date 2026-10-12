@@ -9,8 +9,9 @@ Work such as uploads, messages, and sync is described as data, stored through a 
 | Package | Description | Version |
 |---|---|---|
 | [`durable_queue`](packages/durable_queue) | Core engine. Pure Dart, no runtime dependencies. | [![pub package](https://img.shields.io/pub/v/durable_queue.svg)](https://pub.dev/packages/durable_queue) |
+| [`durable_queue_sqlite`](packages/durable_queue_sqlite) | SQLite storage: tasks survive restarts and crashes. | [![pub package](https://img.shields.io/pub/v/durable_queue_sqlite.svg)](https://pub.dev/packages/durable_queue_sqlite) |
 
-Planned in this repository: SQLite storage, Flutter lifecycle integration, Dio integration, Hive storage, and a DevTools extension. Each will be a separate package, so the core never forces a database, an HTTP client, or Flutter on you.
+Planned in this repository: Flutter lifecycle integration, Dio integration, Hive storage, and a DevTools extension. Each will be a separate package, so the core never forces a database, an HTTP client, or Flutter on you.
 
 ## Get started
 
@@ -25,9 +26,11 @@ The [`durable_queue` README](packages/durable_queue/README.md) has the quick sta
 
 ```text
 packages/
-  durable_queue/     core engine (published to pub.dev)
-pubspec.yaml         Dart pub workspace root (not published)
-CONTRIBUTING.md      how to contribute
+  durable_queue/                core engine (published to pub.dev)
+  durable_queue_sqlite/         SQLite storage (published to pub.dev)
+  durable_queue_test_support/   shared test helpers (not published)
+pubspec.yaml                    Dart pub workspace root (not published)
+CONTRIBUTING.md                 how to contribute
 ```
 
 ## Contributing and feedback

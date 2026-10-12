@@ -1,12 +1,13 @@
 import 'package:durable_queue/durable_queue.dart';
 import 'package:test/test.dart';
 
-import 'support/harness.dart';
+import 'stored_task_builder.dart';
 
 /// Behaviors every [QueueStorage] adapter must satisfy.
 ///
-/// Adapter packages can mirror this suite. The scenarios are also described
-/// in `STORAGE.md`.
+/// Run it from an adapter's tests with a factory that returns a fresh, empty
+/// storage for every test. The scenarios are also described in the core
+/// package's `STORAGE.md`.
 void queueStorageContractTests(QueueStorage Function() create) {
   late QueueStorage storage;
 

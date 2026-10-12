@@ -1,0 +1,16 @@
+name: durable_queue_test_support
+description: Shared test helpers for durable_queue and its storage adapters. Not published.
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+dependencies:
+  durable_queue:
+    path: ../durable_queue
+  test: ^1.33.0
+
+dev_dependencies:
+  lints: ^6.1.0

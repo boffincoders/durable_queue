@@ -327,7 +327,7 @@ The engine talks to storage only through `QueueStorage`, so you choose where tas
 |---|---|---|
 | `MemoryQueueStorage` | No | Included. For tests and process-lifetime queues. |
 | `JsonFileStorage` | Yes | Example in `example/json_file_storage.dart`, checked against the full storage contract. Rewrites one file per change, so it suits small queues. |
-| SQLite (`durable_queue_drift`) | Yes | Planned as a separate package. |
+| [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | Yes | Separate package. Indexed, transactional SQLite storage for Android, iOS, macOS, Windows, and Linux. |
 | Hive, Isar, others | Yes | Not planned yet. Adapters are welcome as separate packages; say what you need in Discussions. |
 
 Adapters stay in separate packages so the core never forces a database on you.
@@ -343,7 +343,7 @@ final class MyStorage implements QueueStorage {
 void main() => queueStorageContractTests(MyStorage.new);
 ```
 
-`queueStorageContractTests` lives in [`test/storage_contract.dart`](https://github.com/boffincoders/durable_queue/blob/main/packages/durable_queue/test/storage_contract.dart); copy it into your adapter's tests. [STORAGE.md](STORAGE.md) lists every method, ordering rule, and atomicity requirement.
+`queueStorageContractTests` lives in [`storage_contract.dart`](https://github.com/boffincoders/durable_queue/blob/main/packages/durable_queue_test_support/lib/src/storage_contract.dart) in the repository's test-support package; copy it into your adapter's tests. [STORAGE.md](STORAGE.md) lists every method, ordering rule, and atomicity requirement.
 
 ## When to use durable_queue
 

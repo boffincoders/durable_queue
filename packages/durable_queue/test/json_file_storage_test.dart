@@ -1,10 +1,10 @@
 import 'dart:io';
 
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue_test_support/durable_queue_test_support.dart';
 import 'package:test/test.dart';
 
 import '../example/json_file_storage.dart';
-import 'storage_contract.dart';
 import 'support/harness.dart';
 
 void main() {

@@ -2,7 +2,7 @@
 
 `QueueStorage` is the persistence boundary. The engine never opens a database itself. `MemoryQueueStorage` keeps tasks in the process and is the reference implementation. A restart only preserves work when the application supplies an adapter that stores `StoredTask` outside memory.
 
-`test/storage_contract.dart` is the executable form of this contract. Adapter packages should mirror those scenarios.
+[`storage_contract.dart`](https://github.com/boffincoders/durable_queue/blob/main/packages/durable_queue_test_support/lib/src/storage_contract.dart) (`queueStorageContractTests`) is the executable form of this contract. Adapters in this repository run it from the unpublished `durable_queue_test_support` package; adapters elsewhere can copy it. `durable_queue_sqlite` is a complete adapter to compare against.
 
 ## Records
 
@@ -52,7 +52,7 @@ The queue settles dependencies; adapters only store and index them. When a task 
 2. Accept the new `TaskStatus.waiting` value and treat it as active for deduplication.
 3. Order `getNextReady` by `priority` descending before the existing order.
 4. Implement `getWaitingDependents` and `getByGroup`.
-5. Run the scenarios in `test/storage_contract.dart` against the adapter.
+5. Run `queueStorageContractTests` against the adapter.
 
 ## One consumer
 

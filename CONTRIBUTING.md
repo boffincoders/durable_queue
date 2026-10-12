@@ -21,8 +21,10 @@ The repository is a Dart pub workspace. Each published package lives in `package
 | Folder | Package |
 |---|---|
 | `packages/durable_queue` | Core engine, pure Dart |
+| `packages/durable_queue_sqlite` | SQLite storage |
+| `packages/durable_queue_test_support` | Shared test helpers, including the storage contract suite. Not published. |
 
-Integration packages (SQLite, Flutter, Dio, Hive) will be added next to it. Run the checks below from inside the package you changed.
+More integrations (Flutter, Dio, Hive) will be added next to them. Run the checks below from inside the package you changed.
 
 ## Checks
 
@@ -52,8 +54,8 @@ dart test
 Adapters are separate packages (for example `durable_queue_<backend>`). To build one:
 
 1. Implement `QueueStorage` following [STORAGE.md](packages/durable_queue/STORAGE.md).
-2. Copy `packages/durable_queue/test/storage_contract.dart` and run `queueStorageContractTests` against your adapter.
-3. Use `packages/durable_queue/example/json_file_storage.dart` as a working reference.
+2. Run `queueStorageContractTests` from `packages/durable_queue_test_support` against your adapter: add it as a `path` dev dependency inside this repository, or copy `lib/src/storage_contract.dart` elsewhere.
+3. Use `packages/durable_queue_sqlite` (database) or `packages/durable_queue/example/json_file_storage.dart` (file) as a working reference.
 4. Announce it in Discussions so it can be listed in the README.
 
 ## License
