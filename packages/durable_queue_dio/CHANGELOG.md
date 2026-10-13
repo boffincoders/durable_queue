@@ -5,7 +5,8 @@
   429, 500, 502, 503, 504 by default; honors `Retry-After` (seconds or
   HTTP-date) up to a configurable maximum. Use `rules.shouldRetry` as
   `retryIf` and `rules.retryDelay` as `retryDelay`.
-* `parseRetryAfter` for `Retry-After` header values.
+* `parseRetryAfter` for `Retry-After` header values. Two-digit years in
+  RFC 850 dates follow the RFC 9110 50-year rule with every `http_parser` 4.x.
 * `TaskContext` helpers: `dioCancelToken()` aborts the request when the task is
   cancelled; `withIdempotencyKey()` sends the task's idempotency key as a
   header (default `Idempotency-Key`).

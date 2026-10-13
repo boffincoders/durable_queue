@@ -195,6 +195,19 @@ void main() {
       );
     });
 
+    test('two-digit years follow the 50-year rule', () {
+      // 99 is more than 50 years ahead of 2026, so it means 1999.
+      expect(
+        parseRetryAfter('Friday, 31-Dec-99 23:59:59 GMT', now: now),
+        Duration.zero,
+      );
+      // 76 is exactly 50 years ahead, so it stays in this century.
+      expect(
+        parseRetryAfter('Tuesday, 13-Oct-76 12:00:30 GMT', now: now),
+        RetryPolicy.maxSchedulableDelay,
+      );
+    });
+
     test('a date in the past means now', () {
       expect(
         parseRetryAfter('Mon, 12 Oct 2026 12:00:00 GMT', now: now),
