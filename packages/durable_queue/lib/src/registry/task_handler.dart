@@ -1,3 +1,4 @@
+import '../retry/retry_policy.dart';
 import '../task/durable_task.dart';
 import '../task/task_context.dart';
 
@@ -23,3 +24,17 @@ typedef TaskHandler<T extends DurableTask> = Future<void> Function(
 ///
 /// A predicate that throws is treated as "do not retry".
 typedef RetryPredicate = bool Function(Object error, StackTrace stackTrace);
+
+/// Chooses the wait before the next attempt after [error], or null to use
+/// the task's [RetryPolicy].
+///
+/// Use it when the error itself says how long to wait, for example an HTTP
+/// 429 or 503 response with a `Retry-After` header. Only consulted when the
+/// task is going to be retried; the attempt still counts toward
+/// `RetryPolicy.maxAttempts`. Negative durations are treated as zero and
+/// values above [RetryPolicy.maxSchedulableDelay] are capped. A resolver
+/// that throws falls back to the policy's delay.
+typedef RetryDelayResolver = Duration? Function(
+  Object error,
+  StackTrace stackTrace,
+);

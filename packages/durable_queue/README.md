@@ -31,7 +31,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 
 ```yaml
 dependencies:
-  durable_queue: ^0.3.0
+  durable_queue: ^0.4.0
 ```
 
 ## Quick start
@@ -165,7 +165,23 @@ queue.register<UploadPhotoTask>(
 );
 ```
 
-The default retries handler errors until the attempt budget is spent. Decode failures are not retried. This package does not inspect HTTP status codes.
+The default retries handler errors until the attempt budget is spent. Decode failures are not retried.
+
+When the error itself says how long to wait, such as an HTTP 429 or 503 with a `Retry-After` header, return that wait from `retryDelay`. It replaces the policy's delay for that retry; return `null` to let the policy decide:
+
+```dart
+queue.register<UploadPhotoTask>(
+  type: 'upload_photo',
+  decoder: UploadPhotoTask.fromJson,
+  handler: upload,
+  retryDelay: (error, stackTrace) =>
+      error is RateLimitedException ? error.retryAfter : null,
+);
+```
+
+The attempt still counts toward `maxAttempts`. Negative waits count as zero, and waits are capped at `RetryPolicy.maxSchedulableDelay`.
+
+The core does not speak HTTP. [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) provides ready-made `retryIf` and `retryDelay` rules for Dio, including `Retry-After`.
 
 ## Deduplication and idempotency
 
@@ -245,7 +261,17 @@ await queue.resume();
 await queue.stop();
 ```
 
-Cancelling queued or waiting work marks it `cancelled` immediately. Cancelling a running task does not abort the future. The handler can read `context.isCancellationRequested` and throw `TaskCancelledException` to stop. If it returns normally, the task is completed.
+Cancelling queued or waiting work marks it `cancelled` immediately. Cancelling a running task does not abort the future. The handler can check `context.isCancellationRequested`, or wait on `context.whenCancellationRequested`, and throw `TaskCancelledException` to stop. If it returns normally, the task is completed.
+
+`whenCancellationRequested` completes the moment the task is cancelled, so it can abort work that accepts a cancel signal:
+
+```dart
+handler: (task, context) async {
+  final token = CancelToken();
+  context.whenCancellationRequested.then((_) => token.cancel());
+  await dio.post(task.url, data: task.body, cancelToken: token);
+},
+```
 
 `pause` finishes handlers that have already started and does not start new ones. `stop` waits for those handlers and leaves everything else stored.
 
@@ -327,7 +353,7 @@ The engine talks to storage only through `QueueStorage`, so you choose where tas
 |---|---|---|
 | `MemoryQueueStorage` | No | Included. For tests and process-lifetime queues. |
 | `JsonFileStorage` | Yes | Example in `example/json_file_storage.dart`, checked against the full storage contract. Rewrites one file per change, so it suits small queues. |
-| [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | Yes | Separate package. Indexed, transactional SQLite storage for Android, iOS, macOS, Windows, and Linux. |
+| [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | Yes | Separate package. Indexed, transactional SQLite storage for Android, iOS, macOS, Windows, Linux, and the web. Use 0.2.0 or later with `durable_queue` 0.4. |
 | Hive, Isar, others | Yes | Not planned yet. Adapters are welcome as separate packages; say what you need in Discussions. |
 
 Adapters stay in separate packages so the core never forces a database on you.

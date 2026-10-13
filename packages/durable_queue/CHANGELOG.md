@@ -1,3 +1,22 @@
+## 0.4.0
+
+* Add `retryDelay` to `register`: a `RetryDelayResolver` that lets an error
+  choose the wait before the next attempt, for example from an HTTP
+  `Retry-After` header. Returning null keeps the `RetryPolicy` delay. The
+  attempt still counts toward `maxAttempts`; negative waits become zero and
+  long ones are capped at `RetryPolicy.maxSchedulableDelay`. A resolver that
+  throws falls back to the policy.
+* Add `TaskContext.whenCancellationRequested`, a future that completes when a
+  running task is cancelled (by `cancel` or `cancelGroup`), so handlers can
+  abort requests without polling. `TaskContext` takes it as a new optional
+  constructor argument.
+* README: `retryDelay`, cancellation signals, and links to
+  `durable_queue_sqlite` and `durable_queue_dio`. The storage contract tests now
+  live in the repository's `durable_queue_test_support` package.
+* No breaking changes and no storage contract changes. Storage adapters for
+  0.3.x work unchanged (`durable_queue_sqlite` needs 0.2.0 for its version
+  constraint).
+
 ## 0.3.1
 
 Documentation and examples only. No API or behavior changes.

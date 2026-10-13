@@ -1,8 +1,13 @@
 import 'dart:convert';
 
 import 'package:durable_queue/durable_queue.dart';
-import 'package:sqlite3/sqlite3.dart';
+import 'package:sqlite3/common.dart';
 
+import 'platform/open_stub.dart'
+    if (dart.library.ffi) 'platform/open_native.dart'
+    if (dart.library.js_interop) 'platform/open_web.dart'
+    as platform;
+import 'platform/opened_database.dart';
 import 'sql.dart';
 
 /// [QueueStorage] backed by SQLite, through `package:sqlite3`.
@@ -15,10 +20,14 @@ import 'sql.dart';
 /// the canonical `StoredTask.toJson` record next to indexed copies of the
 /// fields the queue searches by.
 ///
-/// `package:sqlite3` is synchronous. Each call runs on the calling isolate
-/// and returns a completed future. Queue operations touch one or a few rows,
-/// so this is fast, but very large `getTasks` or `purge` calls will block
-/// that isolate while they run.
+/// Works on Android, iOS, macOS, Windows, and Linux ([open]) and on the web
+/// ([openWeb], with SQLite compiled to WebAssembly and data kept in
+/// IndexedDB).
+///
+/// `package:sqlite3` is synchronous. Each query runs on the calling isolate
+/// (the page's main thread on the web). Queue operations touch one or a few
+/// rows, so this is fast, but very large `getTasks` or `purge` calls block
+/// while they run.
 ///
 /// Only one `DurableQueue` should use a given database and table prefix at a
 /// time.
@@ -27,10 +36,25 @@ final class SqliteQueueStorage implements QueueStorage {
     this._db, {
     required bool ownsDatabase,
     required String tablePrefix,
+    Future<void> Function()? flush,
+    Future<void> Function()? release,
   }) : _ownsDatabase = ownsDatabase,
+       _flush = flush,
+       _release = release,
        _sql = QueueSql(tablePrefix) {
     _migrate();
   }
+
+  SqliteQueueStorage._opened(
+    OpenedDatabase opened, {
+    required String tablePrefix,
+  }) : this._(
+         opened.database,
+         ownsDatabase: true,
+         tablePrefix: tablePrefix,
+         flush: opened.flush,
+         release: opened.release,
+       );
 
   /// Opens or creates the database file at [path].
   ///
@@ -43,38 +67,74 @@ final class SqliteQueueStorage implements QueueStorage {
   /// underscores.
   ///
   /// Throws [StateError] if the tables were created by a newer version of
-  /// this package.
+  /// this package, and [UnsupportedError] on the web (use [openWeb]).
   factory SqliteQueueStorage.open(
     String path, {
     String tablePrefix = defaultTablePrefix,
   }) {
     _checkPrefix(tablePrefix);
-    final db = sqlite3.open(path);
+    final opened = platform.openFile(path);
     try {
-      db.execute('PRAGMA journal_mode = WAL');
-      db.execute('PRAGMA synchronous = FULL');
-      db.execute('PRAGMA busy_timeout = 5000');
-      return SqliteQueueStorage._(
-        db,
-        ownsDatabase: true,
-        tablePrefix: tablePrefix,
-      );
+      return SqliteQueueStorage._opened(opened, tablePrefix: tablePrefix);
     } catch (_) {
-      db.close();
+      opened.database.close();
       rethrow;
     }
   }
 
+  /// Opens or creates a database in the browser. Web only.
+  ///
+  /// SQLite runs as WebAssembly, loaded from [sqliteWasm] (default:
+  /// `sqlite3.wasm` next to your app's `index.html`). Download the
+  /// `sqlite3.wasm` from the `package:sqlite3` GitHub release that matches
+  /// the `sqlite3` version in your `pubspec.lock`, and put it in your app's
+  /// `web/` folder.
+  ///
+  /// The database is stored in IndexedDB under [name]. Every write is
+  /// flushed to IndexedDB before its future completes, so queued tasks
+  /// survive a page reload or a closed tab. Use one [name] per queue, and
+  /// open it in one tab at a time.
+  ///
+  /// With [inMemory], nothing is stored; useful for tests.
+  ///
+  /// Throws [UnsupportedError] on native platforms (use [open]).
+  static Future<SqliteQueueStorage> openWeb(
+    String name, {
+    Uri? sqliteWasm,
+    String tablePrefix = defaultTablePrefix,
+    bool inMemory = false,
+  }) async {
+    _checkPrefix(tablePrefix);
+    if (name.isEmpty || name.contains('/')) {
+      throw ArgumentError.value(name, 'name', 'Must be non-empty, without /');
+    }
+    final opened = await platform.openWeb(
+      name,
+      sqliteWasm: sqliteWasm ?? Uri.parse('sqlite3.wasm'),
+      inMemory: inMemory,
+    );
+    final SqliteQueueStorage storage;
+    try {
+      storage = SqliteQueueStorage._opened(opened, tablePrefix: tablePrefix);
+    } catch (_) {
+      opened.database.close();
+      await opened.release?.call();
+      rethrow;
+    }
+    await storage._flush?.call();
+    return storage;
+  }
+
   /// Creates a storage in a private in-memory database.
   ///
-  /// Nothing survives the process. Useful for tests.
+  /// Nothing survives the process. Useful for tests. Native only; on the
+  /// web use `openWeb(name, inMemory: true)`.
   factory SqliteQueueStorage.inMemory({
     String tablePrefix = defaultTablePrefix,
   }) {
     _checkPrefix(tablePrefix);
-    return SqliteQueueStorage._(
-      sqlite3.openInMemory(),
-      ownsDatabase: true,
+    return SqliteQueueStorage._opened(
+      platform.openMemory(),
       tablePrefix: tablePrefix,
     );
   }
@@ -85,15 +145,21 @@ final class SqliteQueueStorage implements QueueStorage {
   /// journal mode are left to the app, and [close] does not close
   /// [database]. Use a distinct [tablePrefix] per queue if several queues
   /// share one database.
+  ///
+  /// Works with native and web databases. If writes to [database] are
+  /// buffered (for example an IndexedDB file system on the web), pass
+  /// [flush]; it is awaited after every write.
   factory SqliteQueueStorage.fromDatabase(
-    Database database, {
+    CommonDatabase database, {
     String tablePrefix = defaultTablePrefix,
+    Future<void> Function()? flush,
   }) {
     _checkPrefix(tablePrefix);
     return SqliteQueueStorage._(
       database,
       ownsDatabase: false,
       tablePrefix: tablePrefix,
+      flush: flush,
     );
   }
 
@@ -103,8 +169,10 @@ final class SqliteQueueStorage implements QueueStorage {
   /// Schema version this release creates and reads.
   static const schemaVersion = currentSchemaVersion;
 
-  final Database _db;
+  final CommonDatabase _db;
   final bool _ownsDatabase;
+  final Future<void> Function()? _flush;
+  final Future<void> Function()? _release;
   final QueueSql _sql;
   var _closed = false;
 
@@ -118,12 +186,15 @@ final class SqliteQueueStorage implements QueueStorage {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    if (_ownsDatabase) _db.close();
+    if (_ownsDatabase) {
+      _db.close();
+      await _release?.call();
+    }
   }
 
   @override
   Future<void> save(StoredTask task) async {
-    _transaction(() {
+    await _write(() {
       if (_db.select(_sql.exists, [task.id]).isNotEmpty) {
         throw StateError('Task "${task.id}" already exists');
       }
@@ -134,7 +205,7 @@ final class SqliteQueueStorage implements QueueStorage {
 
   @override
   Future<void> update(StoredTask task) async {
-    _transaction(() {
+    await _write(() {
       if (_db.select(_sql.exists, [task.id]).isEmpty) {
         throw StateError('Task "${task.id}" does not exist');
       }
@@ -146,7 +217,7 @@ final class SqliteQueueStorage implements QueueStorage {
 
   @override
   Future<void> delete(String id) async {
-    _transaction(() {
+    await _write(() {
       _db.execute(_sql.deleteTask, [id]);
       _db.execute(_sql.deleteEdges, [id]);
     });
@@ -230,6 +301,13 @@ final class SqliteQueueStorage implements QueueStorage {
         _db.execute(_sql.upsertVersion, ['$currentSchemaVersion']);
       }
     });
+  }
+
+  /// Runs [body] atomically, then persists it if the platform buffers
+  /// writes.
+  Future<void> _write(void Function() body) async {
+    _transaction(body);
+    await _flush?.call();
   }
 
   /// Runs [body] atomically. Uses a savepoint, so it also works when the

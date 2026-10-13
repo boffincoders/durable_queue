@@ -9,5 +9,6 @@ environment:
 
 workspace:
   - packages/durable_queue
+  - packages/durable_queue_dio
   - packages/durable_queue_sqlite
   - packages/durable_queue_test_support

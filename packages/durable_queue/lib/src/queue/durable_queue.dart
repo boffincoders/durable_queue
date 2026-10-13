@@ -129,6 +129,7 @@ final class DurableQueue {
   final StreamController<QueueStorageFailure> _storageErrors =
       StreamController<QueueStorageFailure>.broadcast();
   final Set<String> _cancelRequested = {};
+  final Map<String, Completer<void>> _cancelSignals = {};
 
   QueueRunState _runState = QueueRunState.idle;
   var _inFlight = 0;
@@ -167,11 +168,16 @@ final class DurableQueue {
   /// [RetryPolicy] is exhausted. [TaskCancelledException] is never retried.
   /// Decode failures are never retried. A [retryIf] that throws rejects the
   /// retry.
+  ///
+  /// [retryDelay] lets an error choose the wait before the next attempt, for
+  /// example from an HTTP `Retry-After` header. When it returns null, or is
+  /// omitted, the task's [RetryPolicy] decides. See [RetryDelayResolver].
   void register<T extends DurableTask>({
     required String type,
     required TaskDecoder<T> decoder,
     required TaskHandler<T> handler,
     RetryPredicate? retryIf,
+    RetryDelayResolver? retryDelay,
   }) {
     _ensureOpen();
     _registry.register<T>(
@@ -179,6 +185,7 @@ final class DurableQueue {
       decoder: decoder,
       handler: handler,
       retryIf: retryIf,
+      retryDelay: retryDelay,
     );
   }
 
@@ -581,6 +588,7 @@ final class DurableQueue {
           );
         }
         _cancelRequested.add(task.id);
+        _signalCancel(task.id);
         return true;
       case TaskStatus.completed:
       case TaskStatus.failed:
@@ -1113,6 +1121,7 @@ final class DurableQueue {
       Zone.current.handleUncaughtError(error, stackTrace);
     } finally {
       _cancelRequested.remove(claimed.id);
+      _cancelSignals.remove(claimed.id);
       _exitFlight();
       if (_runState == QueueRunState.running) unawaited(_pump());
     }
@@ -1143,6 +1152,8 @@ final class DurableQueue {
       return;
     }
 
+    final cancelSignal = _cancelSignals[claimed.id] = Completer<void>();
+    if (_cancelRequested.contains(claimed.id)) cancelSignal.complete();
     final context = TaskContext(
       taskId: claimed.id,
       attempt: claimed.attempts,
@@ -1150,6 +1161,7 @@ final class DurableQueue {
       idempotencyKey: claimed.idempotencyKey,
       deduplicationKey: claimed.deduplicationKey,
       isCancellationRequested: () => _cancelRequested.contains(claimed.id),
+      whenCancellationRequested: cancelSignal.future,
     );
 
     try {
@@ -1281,10 +1293,9 @@ final class DurableQueue {
           );
         }
 
-        final delay = current.retryPolicy.delayAfter(
-          current.attempts,
-          _nextFraction(),
-        );
+        final delay =
+            _requestedDelay(registration, error, stackTrace) ??
+            current.retryPolicy.delayAfter(current.attempts, _nextFraction());
         final nextAttemptAt = now.add(delay);
         _considerWake(nextAttemptAt);
         return _Transition(
@@ -1358,6 +1369,34 @@ final class DurableQueue {
     );
     _cancelRequested.remove(current.id);
     return events;
+  }
+
+  /// The delay an error asks for, clamped to `[0, maxSchedulableDelay]`, or
+  /// null to use the retry policy.
+  Duration? _requestedDelay(
+    RegisteredTask registration,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    final resolver = registration.retryDelay;
+    if (resolver == null) return null;
+    final Duration? requested;
+    try {
+      requested = resolver(error, stackTrace);
+    } on Object {
+      return null;
+    }
+    if (requested == null) return null;
+    if (requested.isNegative) return Duration.zero;
+    if (requested > RetryPolicy.maxSchedulableDelay) {
+      return RetryPolicy.maxSchedulableDelay;
+    }
+    return requested;
+  }
+
+  void _signalCancel(String id) {
+    final signal = _cancelSignals[id];
+    if (signal != null && !signal.isCompleted) signal.complete();
   }
 
   bool _allowsRetry(

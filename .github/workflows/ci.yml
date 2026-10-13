@@ -47,6 +47,38 @@ jobs:
       # package:sqlite3 downloads a prebuilt SQLite through its build hook.
       - run: dart test
       - run: dart run example/main.dart
+      # 0.1.0 broke web builds. Compile a small web entry point so that
+      # cannot happen again unnoticed.
+      - name: Web build check
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p web_check
+          printf "import 'package:durable_queue_sqlite/durable_queue_sqlite.dart';\n\nFuture<void> main() async {\n  await SqliteQueueStorage.openWeb('ci');\n}\n" > web_check/main.dart
+          dart compile js -o "$RUNNER_TEMP/web_check.js" web_check/main.dart
+          rm -rf web_check
+      - run: dart pub publish --dry-run
+
+  durable_queue_dio:
+    name: durable_queue_dio (${{ matrix.os }}, Dart ${{ matrix.sdk }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        sdk: ['3.13.0', stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_dio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      # Tests start a local HTTP server and use durable_queue_sqlite.
+      - run: dart test
+      - run: dart run example/main.dart
       - run: dart pub publish --dry-run
 
   durable_queue_test_support:

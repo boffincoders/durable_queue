@@ -1,6 +1,6 @@
 name: durable_queue_sqlite
-description: SQLite storage for durable_queue. Persists tasks across app restarts with indexed, transactional queries.
-version: 0.1.0
+description: SQLite storage for durable_queue on mobile, desktop, and web. Persists tasks across app restarts with indexed, transactional queries.
+version: 0.2.0
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_sqlite
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:
@@ -13,18 +13,19 @@ topics:
 environment:
   sdk: ^3.13.0
 
-# Native SQLite through dart:ffi. Not available on the web.
+# Native SQLite through dart:ffi; on the web, SQLite compiled to WebAssembly.
 platforms:
   android:
   ios:
   linux:
   macos:
+  web:
   windows:
 
 resolution: workspace
 
 dependencies:
-  durable_queue: ^0.3.1
+  durable_queue: '>=0.3.1 <0.5.0'
   sqlite3: ^3.7.0
 
 dev_dependencies:

@@ -12,6 +12,7 @@ final class RegisteredTask {
     required this.decode,
     required this.handle,
     required this.retryIf,
+    required this.retryDelay,
   });
 
   /// Registry key.
@@ -25,6 +26,9 @@ final class RegisteredTask {
 
   /// Optional retry predicate. Null retries every handler error.
   final RetryPredicate? retryIf;
+
+  /// Optional per-error retry delay. Null uses the retry policy.
+  final RetryDelayResolver? retryDelay;
 }
 
 /// Handlers keyed by task type.
@@ -49,6 +53,7 @@ final class TaskRegistry {
     required TaskDecoder<T> decoder,
     required TaskHandler<T> handler,
     RetryPredicate? retryIf,
+    RetryDelayResolver? retryDelay,
   }) {
     if (type.isEmpty) {
       throw ArgumentError.value(type, 'type', 'Must not be empty');
@@ -61,6 +66,7 @@ final class TaskRegistry {
       decode: decoder,
       handle: (task, context) => handler(task as T, context),
       retryIf: retryIf,
+      retryDelay: retryDelay,
     );
   }
 

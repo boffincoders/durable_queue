@@ -1,3 +1,8 @@
+/// @docImport '../queue/durable_queue.dart';
+library;
+
+import 'dart:async';
+
 /// Information about the attempt currently executing.
 ///
 /// Handlers may ignore this. It exists so a handler can read the idempotency
@@ -11,7 +16,10 @@ final class TaskContext {
     required this.idempotencyKey,
     required this.deduplicationKey,
     required bool Function() isCancellationRequested,
-  }) : _isCancellationRequested = isCancellationRequested;
+    Future<void>? whenCancellationRequested,
+  }) : _isCancellationRequested = isCancellationRequested,
+       whenCancellationRequested =
+           whenCancellationRequested ?? Completer<void>().future;
 
   /// Id assigned when the task was enqueued.
   final String taskId;
@@ -35,4 +43,12 @@ final class TaskContext {
   /// The queue cannot abort arbitrary Dart futures. Handlers that need to
   /// stop early should poll this and throw [TaskCancelledException].
   bool get isCancellationRequested => _isCancellationRequested();
+
+  /// Completes when [DurableQueue.cancel] is called for this running task.
+  ///
+  /// Never completes if the task is not cancelled. Use it to abort work that
+  /// accepts a cancellation signal, such as an HTTP request, instead of
+  /// polling [isCancellationRequested]. It completes immediately if
+  /// cancellation was requested before this attempt started.
+  final Future<void> whenCancellationRequested;
 }

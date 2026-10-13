@@ -65,12 +65,14 @@ final class QueueHarness {
     TaskDecoder<ValueTask>? decoder,
     TaskHandler<ValueTask>? handler,
     RetryPredicate? retryIf,
+    RetryDelayResolver? retryDelay,
   }) {
     queue.register<ValueTask>(
       type: type,
       decoder: decoder ?? ValueTask.fromJson,
       handler: handler ?? (task, context) async {},
       retryIf: retryIf,
+      retryDelay: retryDelay,
     );
   }
 
