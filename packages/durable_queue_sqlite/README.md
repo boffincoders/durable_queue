@@ -14,8 +14,8 @@ Everything else (tasks, retries, priorities, dependencies, groups) works exactly
 
 ```yaml
 dependencies:
-  durable_queue: ^0.4.0
-  durable_queue_sqlite: ^0.2.0
+  durable_queue: ^0.5.0
+  durable_queue_sqlite: ^0.2.1
 ```
 
 SQLite itself comes from [`package:sqlite3`](https://pub.dev/packages/sqlite3) 3.x, which bundles a compiled SQLite with your app through Dart build hooks. You do not need `sqlite3_flutter_libs`. To use the operating system's SQLite or an encrypted build instead, see the [`sqlite3` hook options](https://github.com/simolus3/sqlite3.dart/blob/main/sqlite3/doc/hook.md).

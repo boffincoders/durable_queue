@@ -1,3 +1,7 @@
+## 0.2.1
+
+* Allow `durable_queue` 0.5.x (`>=0.3.1 <0.6.0`). No code or schema change.
+
 ## 0.2.0
 
 * Web support. `SqliteQueueStorage.openWeb(name)` runs SQLite as WebAssembly

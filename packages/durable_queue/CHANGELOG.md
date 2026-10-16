@@ -1,3 +1,34 @@
+## 0.5.0
+
+Rate limits and gates.
+
+* Add rate limits. `register(rateLimit: RateLimit(10, per: ...))` limits one
+  task type; `addRateLimit(name, limit, types:, keyOf:)` adds a limit shared
+  by several types, optionally split into buckets by a key such as an API
+  host. Every attempt counts, retries included. A task that must wait gets a
+  reserved slot and is rescheduled once; other task types keep running.
+  Limits are kept in memory.
+* Add gates. `addGate(name, gate)` adds a `QueueGate` (for example network
+  access) and `register(requires: {...})` makes a task type wait while that
+  gate is closed. Deferred tasks keep their status and attempt count and start
+  as soon as the gate opens. Running tasks are not cancelled when a gate
+  closes. `ManualQueueGate` is a gate the app opens and closes itself.
+* Add `register(deferOn:)`: maps a handler error, such as a connection error,
+  to a required gate. The task is deferred instead of failing, the attempt
+  does not count, and the gate's `recheck` is called.
+* Add `DurableQueue(gateRecheckInterval:, gateErrorDelay:)`.
+* Add example `example/rate_limits_and_gates.dart`.
+* README: a table of the `durable_queue` packages;
+  rate limit and gate sections.
+
+### Breaking changes
+
+* New `QueueEvent` subclass `TaskDeferred` (with `DeferralReason`). Exhaustive
+  `switch` statements over `QueueEvent` need a case for it.
+* No storage contract change. Deferral only moves `nextAttemptAt` of a
+  `pending` or `retryScheduled` task, which adapters already honor. Storage
+  adapters written for 0.3 and 0.4 keep working.
+
 ## 0.4.0
 
 * Add `retryDelay` to `register`: a `RetryDelayResolver` that lets an error

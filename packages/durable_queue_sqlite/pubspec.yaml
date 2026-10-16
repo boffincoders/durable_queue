@@ -1,6 +1,6 @@
 name: durable_queue_sqlite
 description: SQLite storage for durable_queue on mobile, desktop, and web. Persists tasks across app restarts with indexed, transactional queries.
-version: 0.2.0
+version: 0.2.1
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_sqlite
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:
@@ -25,7 +25,7 @@ platforms:
 resolution: workspace
 
 dependencies:
-  durable_queue: '>=0.3.1 <0.5.0'
+  durable_queue: '>=0.3.1 <0.6.0'
   sqlite3: ^3.7.0
 
 dev_dependencies:

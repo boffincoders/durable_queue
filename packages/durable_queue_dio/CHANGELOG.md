@@ -1,3 +1,7 @@
+## 0.1.1
+
+* Allow `durable_queue` 0.5.x (`>=0.4.0 <0.6.0`). No code change.
+
 ## 0.1.0
 
 * Initial release.

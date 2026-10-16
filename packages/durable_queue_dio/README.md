@@ -7,9 +7,9 @@
 ```yaml
 dependencies:
   dio: ^5.11.1
-  durable_queue: ^0.4.0
-  durable_queue_dio: ^0.1.0
-  durable_queue_sqlite: ^0.2.0 # optional: keep requests across restarts
+  durable_queue: ^0.5.0
+  durable_queue_dio: ^0.1.1
+  durable_queue_sqlite: ^0.2.1 # optional: keep requests across restarts
 ```
 
 ## Queue an HTTP request
@@ -76,6 +76,31 @@ queue.register<UploadPhotoTask>(
 ```
 
 Store the file path in the task, not the bytes; the file is read again on each attempt.
+
+## Wait for the network
+
+With `durable_queue` 0.5 or later, a task type can wait for a network gate instead of using attempts while offline. Map Dio's connection errors to the gate with `deferOn`:
+
+```dart
+final network = ManualQueueGate();
+queue.addGate('network', network);
+
+queue.register<UploadTask>(
+  type: 'upload',
+  decoder: UploadTask.fromJson,
+  handler: upload,
+  retryIf: rules.shouldRetry,
+  retryDelay: rules.retryDelay,
+  requires: {'network'},
+  deferOn: (error, stackTrace) =>
+      error is DioException &&
+              error.type == DioExceptionType.connectionError
+          ? 'network'
+          : null,
+);
+```
+
+`registerHttpRequests` does not take gates; use your own task type, as above, when you need them.
 
 ## Rules
 

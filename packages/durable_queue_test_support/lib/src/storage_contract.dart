@@ -187,6 +187,23 @@ void queueStorageContractTests(QueueStorage Function() create) {
     },
   );
 
+  test('a pending task with a future nextAttemptAt is not ready', () async {
+    // The queue defers rate-limited and gated tasks this way.
+    final now = DateTime.utc(2026);
+    final later = now.add(const Duration(minutes: 1));
+    await storage.save(storedTask(id: 'deferred', sequence: 0, priority: 9));
+    await storage.update(
+      (await storage.get('deferred'))!.copyWith(nextAttemptAt: later),
+    );
+    await storage.save(storedTask(id: 'ready', sequence: 1));
+    expect((await storage.getNextReady(now))?.id, 'ready');
+    expect(await storage.getNextWakeAt(), later);
+    await storage.delete('ready');
+    expect(await storage.getNextReady(now), isNull);
+    expect((await storage.getNextReady(later))?.id, 'deferred');
+    expect((await storage.getPending()).single.id, 'deferred');
+  });
+
   test('empty bounded queries return null or zero', () async {
     expect(await storage.getNextReady(DateTime.utc(2026)), isNull);
     expect(await storage.getNextWakeAt(), isNull);

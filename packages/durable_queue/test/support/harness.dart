@@ -66,6 +66,9 @@ final class QueueHarness {
     TaskHandler<ValueTask>? handler,
     RetryPredicate? retryIf,
     RetryDelayResolver? retryDelay,
+    Set<String> requires = const {},
+    RateLimit? rateLimit,
+    DeferOnError? deferOn,
   }) {
     queue.register<ValueTask>(
       type: type,
@@ -73,6 +76,9 @@ final class QueueHarness {
       handler: handler ?? (task, context) async {},
       retryIf: retryIf,
       retryDelay: retryDelay,
+      requires: requires,
+      rateLimit: rateLimit,
+      deferOn: deferOn,
     );
   }
 

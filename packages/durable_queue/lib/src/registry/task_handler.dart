@@ -38,3 +38,11 @@ typedef RetryDelayResolver = Duration? Function(
   Object error,
   StackTrace stackTrace,
 );
+
+/// Attributes a handler error to a gate, for example a connection error to a
+/// `network` gate. Return the gate's name to defer the task instead of
+/// counting a failed attempt, or null to handle the error normally.
+///
+/// The returned gate must be one of the task type's `requires`; any other
+/// value is ignored. A function that throws is treated as returning null.
+typedef DeferOnError = String? Function(Object error, StackTrace stackTrace);

@@ -1,4 +1,5 @@
 import '../errors.dart';
+import '../limits/rate_limit.dart';
 import '../task/durable_task.dart';
 import '../task/task_context.dart';
 import 'task_handler.dart';
@@ -13,6 +14,9 @@ final class RegisteredTask {
     required this.handle,
     required this.retryIf,
     required this.retryDelay,
+    required this.requires,
+    required this.rateLimit,
+    required this.deferOn,
   });
 
   /// Registry key.
@@ -29,6 +33,15 @@ final class RegisteredTask {
 
   /// Optional per-error retry delay. Null uses the retry policy.
   final RetryDelayResolver? retryDelay;
+
+  /// Gates that must be open before a task of this type starts.
+  final Set<String> requires;
+
+  /// Optional limit on how often tasks of this type start.
+  final RateLimit? rateLimit;
+
+  /// Optional mapping from handler errors to gates.
+  final DeferOnError? deferOn;
 }
 
 /// Handlers keyed by task type.
@@ -54,6 +67,9 @@ final class TaskRegistry {
     required TaskHandler<T> handler,
     RetryPredicate? retryIf,
     RetryDelayResolver? retryDelay,
+    Set<String> requires = const {},
+    RateLimit? rateLimit,
+    DeferOnError? deferOn,
   }) {
     if (type.isEmpty) {
       throw ArgumentError.value(type, 'type', 'Must not be empty');
@@ -67,6 +83,9 @@ final class TaskRegistry {
       handle: (task, context) => handler(task as T, context),
       retryIf: retryIf,
       retryDelay: retryDelay,
+      requires: Set<String>.unmodifiable(requires),
+      rateLimit: rateLimit,
+      deferOn: deferOn,
     );
   }
 

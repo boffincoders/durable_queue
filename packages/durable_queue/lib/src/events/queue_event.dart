@@ -132,3 +132,48 @@ final class TaskCancelled extends QueueEvent {
   /// its handler started.
   final bool wasRunning;
 }
+
+/// Why a task was deferred. See [TaskDeferred].
+enum DeferralReason {
+  /// A rate limit had no start left; the task waits for its reserved slot.
+  rateLimit,
+
+  /// A gate the task requires was closed.
+  gateClosed,
+
+  /// The handler failed with an error that `register(deferOn:)` attributed
+  /// to a gate, for example a connection error. The attempt does not count.
+  gateError,
+}
+
+/// A task was moved to a later time without using an attempt.
+///
+/// The task keeps its status (`pending` or `retryScheduled`), its attempt
+/// count, and its place among tasks of equal priority. Its
+/// `StoredTask.nextAttemptAt` is set to [until]. A task deferred by a closed
+/// gate is released as soon as that gate opens, which can be before [until].
+final class TaskDeferred extends QueueEvent {
+  /// Creates a deferral event.
+  const TaskDeferred({
+    required super.taskId,
+    required super.taskType,
+    required super.occurredAt,
+    required this.reason,
+    required this.name,
+    required this.until,
+    this.error,
+  });
+
+  /// Why the task was deferred.
+  final DeferralReason reason;
+
+  /// The rate limit or gate responsible. A limit set with
+  /// `register(rateLimit:)` is named `type:<task type>`.
+  final String name;
+
+  /// When the task becomes eligible again at the latest.
+  final DateTime until;
+
+  /// The handler error, for [DeferralReason.gateError].
+  final String? error;
+}

@@ -6,7 +6,10 @@ import 'dart:math';
 import '../clock/queue_clock.dart';
 import '../errors.dart';
 import '../events/queue_event.dart';
+import '../gates/queue_gate.dart';
 import '../internal/async_lock.dart';
+import '../internal/rate_limiter.dart';
+import '../limits/rate_limit.dart';
 import '../registry/task_handler.dart';
 import '../registry/task_registry.dart';
 import '../retry/retry_policy.dart';
@@ -70,6 +73,15 @@ String _defaultTaskId() {
 ///   every other task stored. [stop] does not complete if a handler never
 ///   returns.
 ///
+/// ## Rate limits and gates
+///
+/// [register] takes a `rateLimit` for one task type, and [addRateLimit] adds
+/// a limit shared by several types or split by a key such as an API host.
+/// [addGate] adds a condition, such as network reachability, that task types
+/// list in `register(requires:)`. A task that may not start yet is deferred:
+/// it keeps its status, attempt count, and place in line, and a
+/// [TaskDeferred] event says why and until when.
+///
 /// Only one [DurableQueue] should consume a given [storage] at a time.
 final class DurableQueue {
   /// Creates a queue that persists tasks in [storage].
@@ -79,17 +91,35 @@ final class DurableQueue {
   /// when a retry policy enables jitter. [idGenerator] defaults to a random
   /// UUID v4 string. [storageRetryDelay] must be positive and defaults to one
   /// second; worker storage errors are reported through [storageErrors].
+  /// [gateRecheckInterval] and [gateErrorDelay] must be positive; see their
+  /// documentation.
   DurableQueue({
     required QueueStorage storage,
     QueueClock? clock,
     this.maxConcurrentTasks = 1,
     this.storageRetryDelay = const Duration(seconds: 1),
+    this.gateRecheckInterval = const Duration(minutes: 5),
+    this.gateErrorDelay = const Duration(seconds: 30),
     RandomFraction? randomFraction,
     TaskIdGenerator? idGenerator,
   }) : _storage = storage,
        _clock = clock ?? const SystemQueueClock(),
        _randomFraction = randomFraction ?? Random().nextDouble,
        _idGenerator = idGenerator ?? _defaultTaskId {
+    if (gateRecheckInterval <= Duration.zero) {
+      throw ArgumentError.value(
+        gateRecheckInterval,
+        'gateRecheckInterval',
+        'Must be positive',
+      );
+    }
+    if (gateErrorDelay <= Duration.zero) {
+      throw ArgumentError.value(
+        gateErrorDelay,
+        'gateErrorDelay',
+        'Must be positive',
+      );
+    }
     if (storageRetryDelay <= Duration.zero) {
       throw ArgumentError.value(
         storageRetryDelay,
@@ -122,7 +152,23 @@ final class DurableQueue {
   /// calls and startup recovery report storage errors to their caller instead.
   final Duration storageRetryDelay;
 
+  /// How long a task deferred by a closed gate waits before it is checked
+  /// again, in case the gate never reports opening. A gate that reports
+  /// opening releases its deferred tasks at once. Defaults to five minutes.
+  final Duration gateRecheckInterval;
+
+  /// How long a task waits after `register(deferOn:)` attributed its error
+  /// to a gate that is still open. Closing and reopening the gate releases it
+  /// sooner. Defaults to 30 seconds.
+  final Duration gateErrorDelay;
+
   final TaskRegistry _registry = TaskRegistry();
+  final Map<String, _GateEntry> _gates = {};
+  final Map<String, _SharedLimit> _sharedLimits = {};
+  final Map<String, RateLimiter> _typeLimiters = {};
+
+  /// Rate-limit slots already taken for deferred tasks, by task id.
+  final Map<String, ({DateTime slot, Set<String> buckets})> _reservations = {};
   final AsyncLock _lock = AsyncLock();
   final StreamController<QueueEvent> _events =
       StreamController<QueueEvent>.broadcast();
@@ -172,20 +218,109 @@ final class DurableQueue {
   /// [retryDelay] lets an error choose the wait before the next attempt, for
   /// example from an HTTP `Retry-After` header. When it returns null, or is
   /// omitted, the task's [RetryPolicy] decides. See [RetryDelayResolver].
+  ///
+  /// [requires] names gates added with [addGate] that must be open before a
+  /// task of this type starts. [rateLimit] limits how often tasks of this
+  /// type start; every attempt counts. [deferOn] maps a handler error to one
+  /// of [requires], for example a connection error to `network`: the task is
+  /// then deferred instead of failing, the attempt does not count, and the
+  /// gate is asked to [QueueGate.recheck]. [deferOn] is consulted before
+  /// [retryIf].
+  ///
+  /// Throws [ArgumentError] if a gate in [requires] has not been added, or
+  /// if [deferOn] is given without [requires].
   void register<T extends DurableTask>({
     required String type,
     required TaskDecoder<T> decoder,
     required TaskHandler<T> handler,
     RetryPredicate? retryIf,
     RetryDelayResolver? retryDelay,
+    Set<String> requires = const {},
+    RateLimit? rateLimit,
+    DeferOnError? deferOn,
   }) {
     _ensureOpen();
+    for (final gate in requires) {
+      if (!_gates.containsKey(gate)) {
+        throw ArgumentError.value(
+          requires,
+          'requires',
+          'Gate "$gate" has not been added. Call addGate first',
+        );
+      }
+    }
+    if (deferOn != null && requires.isEmpty) {
+      throw ArgumentError.value(
+        deferOn,
+        'deferOn',
+        'Needs at least one gate in requires',
+      );
+    }
     _registry.register<T>(
       type: type,
       decoder: decoder,
       handler: handler,
       retryIf: retryIf,
       retryDelay: retryDelay,
+      requires: requires,
+      rateLimit: rateLimit,
+      deferOn: deferOn,
+    );
+    if (rateLimit != null) _typeLimiters[type] = RateLimiter(rateLimit);
+  }
+
+  /// Adds a gate named [name].
+  ///
+  /// Task types list gates in `register(requires:)`, so add gates before
+  /// registering those types. When the gate reports opening, tasks it
+  /// deferred become eligible at once. Closing a gate does not affect tasks
+  /// that are already running.
+  ///
+  /// Throws [ArgumentError] if [name] is empty and [StateError] if a gate
+  /// with that name exists or the queue is closed.
+  void addGate(String name, QueueGate gate) {
+    _ensureOpen();
+    _rejectBlank(name, 'name');
+    if (_gates.containsKey(name)) {
+      throw StateError('Gate "$name" has already been added');
+    }
+    final entry = _GateEntry(gate);
+    _gates[name] = entry;
+    entry.subscription = gate.changes.listen((open) {
+      if (open) unawaited(_releaseGate(name));
+    });
+  }
+
+  /// Adds a rate limit shared by several task types.
+  ///
+  /// The limit applies to tasks whose type is in [types], or to every task
+  /// when [types] is null. [keyOf] splits the limit into independent buckets,
+  /// for example one per API host; a task for which it returns null is not
+  /// limited by this limit. Without [keyOf], all matching tasks share one
+  /// bucket. A task must satisfy every limit that applies to it, including
+  /// its type's `register(rateLimit:)`. Every attempt counts.
+  ///
+  /// [name] identifies the limit in [TaskDeferred] events. Throws
+  /// [ArgumentError] if [name] is empty or [types] is empty, and
+  /// [StateError] if a limit with that name exists or the queue is closed.
+  void addRateLimit(
+    String name,
+    RateLimit limit, {
+    Set<String>? types,
+    RateLimitKey? keyOf,
+  }) {
+    _ensureOpen();
+    _rejectBlank(name, 'name');
+    if (types != null && types.isEmpty) {
+      throw ArgumentError.value(types, 'types', 'Must not be empty');
+    }
+    if (_sharedLimits.containsKey(name)) {
+      throw StateError('Rate limit "$name" has already been added');
+    }
+    _sharedLimits[name] = _SharedLimit(
+      RateLimiter(limit),
+      types == null ? null : Set<String>.unmodifiable(types),
+      keyOf,
     );
   }
 
@@ -805,6 +940,9 @@ final class DurableQueue {
   Future<void> _close() async {
     _closed = true;
     await stop();
+    for (final entry in _gates.values) {
+      await entry.subscription?.cancel();
+    }
     await _events.close();
     await _storageErrors.close();
   }
@@ -1056,8 +1194,14 @@ final class DurableQueue {
         _pumpAgain = false;
         while (_runState == QueueRunState.running &&
             _inFlight < maxConcurrentTasks) {
-          final claimed = await _lock.synchronized(_claimNext);
-          if (claimed == null) break;
+          final next = await _lock.synchronized(_claimNext);
+          if (next == null) break;
+          final deferred = next.deferred;
+          if (deferred != null) {
+            _emit(deferred);
+            continue;
+          }
+          final claimed = next.claimed!;
           if (_runState != QueueRunState.running) {
             await _lock.synchronized(() => _revertClaim(claimed));
             break;
@@ -1072,22 +1216,181 @@ final class DurableQueue {
     if (_runState == QueueRunState.running) await _armNextWake();
   }
 
-  Future<StoredTask?> _claimNext() async {
+  /// Claims the next ready task, or defers it when a gate or rate limit does
+  /// not allow it to start yet. Returns null when nothing is ready.
+  Future<_Claim?> _claimNext() async {
     if (_runState != QueueRunState.running) return null;
     final task = await _retryStorage(
       () => _storage.getNextReady(_clock.now()),
       'getNextReady',
     );
     if (task == null) return null;
+    final now = _clock.now();
+    final deferral = _deferralFor(task, now);
+    if (deferral != null) {
+      await _retryStorage(
+        () => _storage.update(
+          task.copyWith(updatedAt: now, nextAttemptAt: deferral.until),
+        ),
+        'update',
+      );
+      if (deferral.reason == DeferralReason.gateClosed) {
+        _gates[deferral.name]?.deferred[task.id] = deferral.until;
+      }
+      return _Claim.deferred(
+        TaskDeferred(
+          taskId: task.id,
+          taskType: task.type,
+          occurredAt: now,
+          reason: deferral.reason,
+          name: deferral.name,
+          until: deferral.until,
+        ),
+      );
+    }
     // Claim only one due retry rather than promoting the whole backlog.
     final claimed = task.copyWith(
       status: TaskStatus.running,
       attempts: task.attempts + 1,
-      updatedAt: _clock.now(),
+      updatedAt: now,
       nextAttemptAt: null,
     );
     await _retryStorage(() => _storage.update(claimed), 'update');
-    return claimed;
+    return _Claim.claimed(claimed);
+  }
+
+  /// Decides whether [task] must wait for a gate or a rate limit. Takes a
+  /// rate-limit slot when the task may start now or is deferred to a later
+  /// slot. Must run inside [_lock].
+  _Deferral? _deferralFor(StoredTask task, DateTime now) {
+    final registration = _registry.find(task.type);
+    // Unknown types fail when claimed; they never start a handler.
+    if (registration == null) return null;
+
+    for (final gate in registration.requires) {
+      final entry = _gates[gate];
+      if (entry != null && !entry.gate.isOpen) {
+        // A closed gate wastes any slot the task held.
+        _reservations.remove(task.id);
+        return _Deferral(
+          DeferralReason.gateClosed,
+          gate,
+          now.add(gateRecheckInterval),
+        );
+      }
+    }
+
+    final buckets = <_Bucket>[];
+    final typeLimiter = _typeLimiters[task.type];
+    if (typeLimiter != null) {
+      buckets.add(_Bucket(typeLimiter, null, 'type:${task.type}'));
+    }
+    for (final MapEntry(key: name, value: limit) in _sharedLimits.entries) {
+      final types = limit.types;
+      if (types != null && !types.contains(task.type)) continue;
+      String? key;
+      final keyOf = limit.keyOf;
+      if (keyOf != null) {
+        try {
+          key = keyOf(task);
+        } on Object {
+          continue;
+        }
+        if (key == null) continue;
+      }
+      buckets.add(_Bucket(limit.limiter, key, name));
+    }
+
+    // Slots reserved when the task was deferred are already paid for.
+    final reservation = _reservations.remove(task.id);
+    final paid = reservation != null && !reservation.slot.isAfter(now)
+        ? reservation.buckets
+        : const <String>{};
+    final unpaid = [
+      for (final bucket in buckets)
+        if (!paid.contains(bucket.id)) bucket,
+    ];
+    if (unpaid.isEmpty) return null;
+
+    // Only buckets that are full now are reserved for later. Taking a future
+    // slot in a bucket with room would hold back other tasks for no reason.
+    var slot = now;
+    var limitName = unpaid.first.name;
+    final blocking = <_Bucket>[];
+    for (final bucket in unpaid) {
+      final earliest = bucket.limiter.earliest(bucket.key, now);
+      if (!earliest.isAfter(now)) continue;
+      blocking.add(bucket);
+      if (earliest.isAfter(slot)) {
+        slot = earliest;
+        limitName = bucket.name;
+      }
+    }
+    _pruneLimits(now);
+    if (blocking.isEmpty) {
+      for (final bucket in unpaid) {
+        bucket.limiter.consume(bucket.key, now);
+      }
+      return null;
+    }
+    for (final bucket in blocking) {
+      bucket.limiter.consume(bucket.key, slot);
+    }
+    _reservations[task.id] = (
+      slot: slot,
+      buckets: {...paid, for (final bucket in blocking) bucket.id},
+    );
+    return _Deferral(DeferralReason.rateLimit, limitName, slot);
+  }
+
+  var _claimsSincePrune = 0;
+
+  /// Keeps limiter keys and stale reservations from growing without bound.
+  void _pruneLimits(DateTime now) {
+    if (++_claimsSincePrune < 1000) return;
+    _claimsSincePrune = 0;
+    for (final limiter in _typeLimiters.values) {
+      limiter.prune(now);
+    }
+    for (final limit in _sharedLimits.values) {
+      limit.limiter.prune(now);
+    }
+    // A reservation more than a day overdue belongs to a task that was
+    // cancelled, deleted, or claimed by another path.
+    final stale = now.subtract(const Duration(days: 1));
+    _reservations.removeWhere((_, entry) => entry.slot.isBefore(stale));
+  }
+
+  /// Makes every task that [gate] deferred eligible now.
+  Future<void> _releaseGate(String gate) async {
+    final entry = _gates[gate];
+    if (entry == null || entry.deferred.isEmpty) {
+      if (_runState == QueueRunState.running) unawaited(_pump());
+      return;
+    }
+    await _lock.synchronized(() async {
+      final deferred = Map<String, DateTime>.of(entry.deferred);
+      entry.deferred.clear();
+      final now = _clock.now();
+      for (final MapEntry(key: id, value: until) in deferred.entries) {
+        final task = await _retryStorage(() => _storage.get(id), 'get');
+        if (task == null || task.nextAttemptAt != until) continue;
+        if (task.status != TaskStatus.pending &&
+            task.status != TaskStatus.retryScheduled) {
+          continue;
+        }
+        await _retryStorage(
+          () => _storage.update(
+            task.copyWith(
+              updatedAt: now,
+              nextAttemptAt: task.status == TaskStatus.pending ? null : now,
+            ),
+          ),
+          'update',
+        );
+      }
+    });
+    if (_runState == QueueRunState.running) unawaited(_pump());
   }
 
   Future<void> _revertClaim(StoredTask claimed) async {
@@ -1272,6 +1575,33 @@ final class DurableQueue {
           return _cancelledTransition(current, now, error, stackTrace);
         }
         final failure = failureOf(error, stackTrace);
+        final gate = _gateFor(registration, error, stackTrace);
+        if (gate != null) {
+          final until = now.add(gateErrorDelay);
+          final attempts = current.attempts - 1;
+          _gates[gate]?.deferred[current.id] = until;
+          _considerWake(until);
+          return _Transition(
+            current.copyWith(
+              status: attempts > 0
+                  ? TaskStatus.retryScheduled
+                  : TaskStatus.pending,
+              attempts: attempts,
+              updatedAt: now,
+              nextAttemptAt: until,
+              lastFailure: failure,
+            ),
+            TaskDeferred(
+              taskId: current.id,
+              taskType: current.type,
+              occurredAt: now,
+              reason: DeferralReason.gateError,
+              name: gate,
+              until: until,
+              error: failure.error,
+            ),
+          );
+        }
         final retry =
             current.attempts < current.retryPolicy.maxAttempts &&
             _allowsRetry(registration, error, stackTrace);
@@ -1319,6 +1649,30 @@ final class DurableQueue {
       }),
     );
     _emitAll(events);
+    for (final event in events) {
+      if (event is TaskDeferred && event.reason == DeferralReason.gateError) {
+        _gates[event.name]?.gate.recheck();
+      }
+    }
+  }
+
+  /// The gate [registration]'s `deferOn` assigns to [error], if it is one of
+  /// the type's required gates.
+  String? _gateFor(
+    RegisteredTask registration,
+    Object error,
+    StackTrace stackTrace,
+  ) {
+    final deferOn = registration.deferOn;
+    if (deferOn == null) return null;
+    final String? gate;
+    try {
+      gate = deferOn(error, stackTrace);
+    } on Object {
+      return null;
+    }
+    if (gate == null || !registration.requires.contains(gate)) return null;
+    return gate;
   }
 
   _Transition _cancelledTransition(
@@ -1636,3 +1990,54 @@ typedef _StorageIo = Future<T> Function<T>(
 
 Future<T> _direct<T>(Future<T> Function() operation, String name) =>
     operation();
+
+/// A gate added with [DurableQueue.addGate].
+final class _GateEntry {
+  _GateEntry(this.gate);
+
+  final QueueGate gate;
+  StreamSubscription<bool>? subscription;
+
+  /// Tasks this gate deferred in this process, with the time they were
+  /// deferred to. Used to release them early when the gate opens.
+  final Map<String, DateTime> deferred = {};
+}
+
+/// A limit added with [DurableQueue.addRateLimit].
+final class _SharedLimit {
+  _SharedLimit(this.limiter, this.types, this.keyOf);
+
+  final RateLimiter limiter;
+  final Set<String>? types;
+  final RateLimitKey? keyOf;
+}
+
+/// One rate-limit bucket that applies to a task.
+final class _Bucket {
+  _Bucket(this.limiter, this.key, this.name);
+
+  final RateLimiter limiter;
+  final String? key;
+  final String name;
+
+  /// Identifies the bucket across claims.
+  String get id => key == null ? name : '$name\u0000$key';
+}
+
+/// Why and until when a ready task must wait.
+final class _Deferral {
+  const _Deferral(this.reason, this.name, this.until);
+
+  final DeferralReason reason;
+  final String name;
+  final DateTime until;
+}
+
+/// Result of one [DurableQueue._claimNext] call.
+final class _Claim {
+  const _Claim.claimed(StoredTask this.claimed) : deferred = null;
+  const _Claim.deferred(TaskDeferred this.deferred) : claimed = null;
+
+  final StoredTask? claimed;
+  final TaskDeferred? deferred;
+}

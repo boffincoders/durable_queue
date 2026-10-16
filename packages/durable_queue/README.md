@@ -19,6 +19,8 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Tasks are data, so they can be stored and rebuilt after a restart
 * Fixed and exponential retry with optional jitter, and a `retryIf` filter
 * Concurrency limits and priorities
+* Rate limits per task type, or per key such as an API host
+* Gates: tasks that need the network wait while offline, without using attempts
 * Task dependencies, chains, and groups
 * Deduplication and idempotency keys
 * Cooperative cancellation, pause, resume, and stop
@@ -31,8 +33,20 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 
 ```yaml
 dependencies:
-  durable_queue: ^0.4.0
+  durable_queue: ^0.5.0
 ```
+
+## Packages
+
+`durable_queue` is the core: pure Dart, with no database, HTTP client, or Flutter dependency. Integrations are separate packages from the same [repository](https://github.com/boffincoders/durable_queue), so you add only what you use.
+
+| Package | What it adds |
+|---|---|
+| [`durable_queue`](https://pub.dev/packages/durable_queue) | The engine: tasks, retries, priorities, dependencies, rate limits, gates. |
+| [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | SQLite storage that survives restarts, on Android, iOS, macOS, Windows, Linux, and the web. |
+| [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
+
+Need an integration that is not listed? Ask in [Discussions](https://github.com/boffincoders/durable_queue/discussions).
 
 ## Quick start
 
@@ -252,6 +266,61 @@ final cancelled = await queue.cancelGroup('sync');
 
 A group is a label. `cancelGroup` cancels every active task in it, using the same rules as `cancel`, and returns how many tasks it affected.
 
+## Rate limits
+
+Limit how often tasks start. Every attempt counts, retries included, because each one reaches the service you are protecting.
+
+```dart
+// At most 10 uploads per minute.
+queue.register<UploadPhotoTask>(
+  type: 'upload_photo',
+  decoder: UploadPhotoTask.fromJson,
+  handler: upload,
+  rateLimit: RateLimit(10, per: Duration(minutes: 1)),
+);
+
+// At most 5 requests per second to each API host, across task types.
+queue.addRateLimit(
+  'per-host',
+  RateLimit(5, per: Duration(seconds: 1)),
+  types: {'upload_photo', 'send_message'},
+  keyOf: (task) => Uri.parse(task.payload['url'] as String).host,
+);
+```
+
+Up to `count` tasks may start back to back, then starts are spaced by `per / count`. A task that has to wait is deferred: it keeps its status, attempt count, and place in line, and gets a reserved slot, so it is rescheduled once rather than polled. Other task types keep running meanwhile. A task must satisfy every limit that applies to it. Limits live in memory and start empty after a restart.
+
+## Gates: waiting for the network and other conditions
+
+A gate is a condition a task type needs before it starts, such as network access. While a required gate is closed, matching tasks are deferred without using attempts, other work keeps running, and the deferred tasks start as soon as the gate opens.
+
+```dart
+final network = ManualQueueGate();
+queue.addGate('network', network); // add gates before registering types that need them
+
+queue.register<UploadPhotoTask>(
+  type: 'upload_photo',
+  decoder: UploadPhotoTask.fromJson,
+  handler: upload,
+  requires: {'network'},
+  // A connection error means "offline", not "this upload failed".
+  deferOn: (error, stackTrace) =>
+      error is SocketException ? 'network' : null,
+);
+
+// Open and close it from whatever tracks connectivity in your app:
+connectivity.onConnectivityChanged.listen((results) {
+  network.set(!results.contains(ConnectivityResult.none));
+});
+```
+
+* Closing a gate does not cancel tasks that are already running.
+* `deferOn` maps a handler error to one of the type's gates. The task is deferred instead of failing, the attempt does not count, and the gate's `recheck` is called. The task tries again after `gateErrorDelay` (default 30 seconds), or as soon as the gate closes and reopens.
+* A gate that never reports opening is checked again every `gateRecheckInterval` (default five minutes).
+* Implement `QueueGate` for other conditions, such as Wi-Fi only, charging, or signed in.
+
+A connection-type report (Wi-Fi, mobile) does not prove the internet is reachable, for example behind a captive portal. `deferOn` covers that case: the request fails, the task waits, and the gate can probe.
+
 ## Cancellation and controls
 
 ```dart
@@ -305,12 +374,14 @@ await queue.close();
 
 ```dart
 queue.events.listen((event) {
-  // TaskEnqueued, TaskStarted, TaskRetryScheduled,
+  // TaskEnqueued, TaskStarted, TaskRetryScheduled, TaskDeferred,
   // TaskCompleted, TaskFailed, TaskCancelled
 });
 
 final failed = await queue.getTasks(status: TaskStatus.failed);
 ```
+
+`TaskDeferred` says why a task waits (`rateLimit`, `gateClosed`, or `gateError`), which limit or gate is responsible, and until when.
 
 The event stream is broadcast and does not replay events that happened before the listener subscribed.
 
@@ -343,7 +414,7 @@ StreamBuilder<QueueEvent>(
 );
 ```
 
-`JsonFileStorage` is the reference adapter from `example/json_file_storage.dart`; copy it into your app or write your own (see below). The queue runs while your app's process runs. It does not wake a terminated app; call `start` again on the next launch. A `durable_queue_flutter` package for app lifecycle integration is planned.
+`JsonFileStorage` is the reference adapter from `example/json_file_storage.dart`; copy it into your app or write your own (see below). The queue runs while your app's process runs. It does not wake a terminated app; call `start` again on the next launch.
 
 ## Storage
 
@@ -353,8 +424,8 @@ The engine talks to storage only through `QueueStorage`, so you choose where tas
 |---|---|---|
 | `MemoryQueueStorage` | No | Included. For tests and process-lifetime queues. |
 | `JsonFileStorage` | Yes | Example in `example/json_file_storage.dart`, checked against the full storage contract. Rewrites one file per change, so it suits small queues. |
-| [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | Yes | Separate package. Indexed, transactional SQLite storage for Android, iOS, macOS, Windows, Linux, and the web. Use 0.2.0 or later with `durable_queue` 0.4. |
-| Hive, Isar, others | Yes | Not planned yet. Adapters are welcome as separate packages; say what you need in Discussions. |
+| [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | Yes | Separate package. Indexed, transactional SQLite storage for Android, iOS, macOS, Windows, Linux, and the web. Use 0.2.1 or later with `durable_queue` 0.5. |
+| Hive, Isar, others | Yes | Adapters are welcome as separate packages; say what you need in Discussions. |
 
 Adapters stay in separate packages so the core never forces a database on you.
 
@@ -380,6 +451,7 @@ void main() => queueStorageContractTests(MyStorage.new);
 | Retry with backoff and a retry filter | You write it | Usually you write it | Built in | Varies by platform |
 | Deduplication and idempotency keys | You write it | Usually you write it | Built in | Varies by platform |
 | Dependencies, chains, priorities | You write it | Rarely | Built in | Varies by platform |
+| Rate limits, waiting for the network | You write it | Rarely | Built in | Network constraints only |
 | Testable without real waiting | Depends on your code | Depends | Yes (`FakeQueueClock`) | Limited |
 | Platforms | Any | Any | Any Dart platform | One platform per API |
 
@@ -403,6 +475,7 @@ Do not put secrets in task payloads or exception text. The queue stores them as 
 dart run example/main.dart           # one task, one retry
 dart run example/image_upload.dart   # uploads that survive a restart
 dart run example/orchestration.dart  # chains, dependencies, priorities
+dart run example/rate_limits_and_gates.dart  # rate limits, offline gate
 ```
 
 ## Contributing and feedback
