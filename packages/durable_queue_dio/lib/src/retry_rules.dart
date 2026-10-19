@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:durable_queue/durable_queue.dart';
 
 import 'retry_after.dart';
 
@@ -74,6 +75,38 @@ final class DioRetryRules {
       return status != null && retryStatusCodes.contains(status);
     }
     return false;
+  }
+
+  /// Whether [error] means the server could not be reached at all: a
+  /// [DioException] of type `connectionError` (DNS failure, refused, reset,
+  /// offline) or `connectionTimeout`.
+  ///
+  /// Send and receive timeouts are not included: the connection was made, so
+  /// the network was there.
+  static bool isConnectionError(Object error) {
+    if (error is! DioException) return false;
+    return error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout;
+  }
+
+  /// A `register(deferOn:)` rule that sends connection errors to [gate].
+  ///
+  /// The task then waits for the gate instead of using an attempt, and the
+  /// gate is asked to check again. [gate] must be one of the task type's
+  /// `requires`:
+  ///
+  /// ```dart
+  /// queue.registerHttpRequests(
+  ///   dio,
+  ///   requires: {'network'},
+  ///   deferOn: rules.deferOn('network'),
+  /// );
+  /// ```
+  DeferOnError deferOn(String gate) {
+    if (gate.isEmpty) {
+      throw ArgumentError.value(gate, 'gate', 'Must not be empty');
+    }
+    return (error, stackTrace) => isConnectionError(error) ? gate : null;
   }
 
   /// The delay a response asked for with `Retry-After`, or null to use the

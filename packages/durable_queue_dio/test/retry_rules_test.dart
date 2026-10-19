@@ -115,6 +115,104 @@ void main() {
     });
   });
 
+  group('connection errors', () {
+    test('isConnectionError covers connection failures only', () {
+      expect(
+        DioRetryRules.isConnectionError(
+          dioError(DioExceptionType.connectionError),
+        ),
+        isTrue,
+      );
+      expect(
+        DioRetryRules.isConnectionError(
+          dioError(DioExceptionType.connectionTimeout),
+        ),
+        isTrue,
+      );
+      for (final type in [
+        DioExceptionType.sendTimeout,
+        DioExceptionType.receiveTimeout,
+        DioExceptionType.cancel,
+        DioExceptionType.unknown,
+      ]) {
+        expect(DioRetryRules.isConnectionError(dioError(type)), isFalse);
+      }
+      expect(
+        DioRetryRules.isConnectionError(
+          dioError(DioExceptionType.badResponse, status: 503),
+        ),
+        isFalse,
+      );
+      expect(DioRetryRules.isConnectionError(StateError('x')), isFalse);
+    });
+
+    test('deferOn names the gate for connection errors', () {
+      final rule = rules.deferOn('network');
+      expect(
+        rule(dioError(DioExceptionType.connectionError), trace),
+        'network',
+      );
+      expect(
+        rule(dioError(DioExceptionType.badResponse, status: 500), trace),
+        isNull,
+      );
+      expect(() => rules.deferOn(''), throwsArgumentError);
+    });
+  });
+
+  group('HttpRequestTask.hostOf', () {
+    StoredTask stored(String url, {String type = HttpRequestTask.taskType}) {
+      final now = DateTime.utc(2026);
+      return StoredTask(
+        id: url,
+        type: type,
+        payload: HttpRequestTask(method: 'GET', url: url).toJson(),
+        status: TaskStatus.pending,
+        attempts: 0,
+        retryPolicy: RetryPolicy.none(),
+        createdAt: now,
+        updatedAt: now,
+        sequence: 1,
+      );
+    }
+
+    test('reads the host and explicit port', () {
+      expect(
+        HttpRequestTask.hostOf(stored('https://API.example.com/a')),
+        'api.example.com',
+      );
+      expect(
+        HttpRequestTask.hostOf(stored('http://127.0.0.1:8080/a')),
+        '127.0.0.1:8080',
+      );
+    });
+
+    test('resolves relative URLs against baseUrl', () {
+      expect(HttpRequestTask.hostOf(stored('/a')), isNull);
+      expect(
+        HttpRequestTask.hostOf(
+          stored('/a'),
+          baseUrl: 'https://api.example.com/v1/',
+        ),
+        'api.example.com',
+      );
+      expect(
+        HttpRequestTask.hostOf(
+          stored('https://other.example.com/a'),
+          baseUrl: 'https://api.example.com',
+        ),
+        'other.example.com',
+      );
+    });
+
+    test('ignores other task types', () {
+      expect(
+        HttpRequestTask.hostOf(stored('https://a.example.com', type: 'x')),
+        isNull,
+      );
+    });
+  });
+
   group('retryDelay', () {
     final now = DateTime.utc(2026, 10, 13, 12);
     final fixed = DioRetryRules(now: () => now);

@@ -1,3 +1,18 @@
+## 0.2.0
+
+* `registerHttpRequests` takes `requires`, `deferOn`, and `rateLimit` and
+  passes them to `DurableQueue.register`, so queued requests can wait for a
+  network gate and be rate limited.
+* `DioRetryRules.deferOn(gate)`: a `register(deferOn:)` rule that turns
+  connection errors (`connectionError`, `connectionTimeout`) into a wait for
+  the gate instead of a failed attempt. `DioRetryRules.isConnectionError`
+  exposes the same check.
+* `queue.addHttpHostRateLimit(limit, dio:)`: a rate limit per API host for
+  queued requests. Relative URLs are resolved against the Dio `baseUrl`.
+* `HttpRequestTask.hostOf(task, baseUrl:)`: the host a stored request goes
+  to.
+* Requires `durable_queue` 0.5.0 or later (`>=0.5.0 <0.6.0`).
+
 ## 0.1.1
 
 * Allow `durable_queue` 0.5.x (`>=0.4.0 <0.6.0`). No code change.

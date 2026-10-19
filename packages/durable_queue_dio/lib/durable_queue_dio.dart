@@ -4,7 +4,9 @@
 /// * [DurableQueueDioContext]: cancel tokens and idempotency headers for a
 ///   running task.
 /// * [HttpRequestTask] and [DurableQueueDio.registerHttpRequests]: queue
-///   plain HTTP requests without writing a task class.
+///   plain HTTP requests without writing a task class, optionally behind a
+///   network gate and with per-host rate limits
+///   ([DurableQueueDio.addHttpHostRateLimit]).
 library;
 
 export 'src/http_request_task.dart';

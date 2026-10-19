@@ -1,3 +1,11 @@
+## 0.5.1
+
+Documentation only. No API or behavior changes.
+
+* README: links to `durable_queue_connectivity` (a ready-made network gate for
+  Flutter) and to the network gate and per-host limit support in
+  `durable_queue_dio` 0.2.0.
+
 ## 0.5.0
 
 Rate limits and gates.

@@ -18,16 +18,24 @@ final class Harness {
     DioRetryRules rules = const DioRetryRules(),
     Dio? dio,
     HttpResponseCallback? onResponse,
+    void Function(DurableQueue queue)? setup,
+    Set<String> requires = const {},
+    DeferOnError? deferOn,
+    RateLimit? rateLimit,
   }) {
     queue = DurableQueue(
       storage: storage ?? MemoryQueueStorage(),
       clock: clock,
       randomFraction: () => 0.5,
     );
+    setup?.call(queue);
     queue.registerHttpRequests(
       dio ?? Dio(),
       rules: rules,
       onResponse: onResponse,
+      requires: requires,
+      deferOn: deferOn,
+      rateLimit: rateLimit,
     );
     queue.events.listen(events.add);
   }
@@ -317,6 +325,130 @@ void main() {
       cancel.complete();
       await pumpEventQueue();
       expect(token.isCancelled, isTrue);
+    });
+  });
+
+  group('gates and limits', () {
+    test('requests wait for the network gate, then go out', () async {
+      server.script('/a', [respond(200)]);
+      final network = ManualQueueGate(open: false);
+      final h = Harness(
+        server,
+        setup: (queue) => queue.addGate('network', network),
+        requires: {'network'},
+      );
+      await h.queue.start();
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a')),
+      );
+      await h.until(() => h.of<TaskDeferred>().isNotEmpty);
+      expect(h.of<TaskDeferred>().single.reason, DeferralReason.gateClosed);
+      expect(server.received, isEmpty);
+
+      network.open();
+      await h.until(() => h.of<TaskCompleted>().isNotEmpty);
+      expect(server.received, hasLength(1));
+      await h.queue.close();
+    });
+
+    test(
+      'a connection error waits for the gate without using an attempt',
+      () async {
+        // A port with nothing listening: Dio reports connectionError.
+        final closed = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+        final deadUrl = 'http://127.0.0.1:${closed.port}/x';
+        await closed.close();
+
+        const rules = DioRetryRules();
+        final h = Harness(
+          server,
+          rules: rules,
+          setup: (queue) => queue.addGate('network', ManualQueueGate()),
+          requires: {'network'},
+          deferOn: rules.deferOn('network'),
+        );
+        await h.queue.start();
+        final id = await h.queue.enqueue(
+          HttpRequestTask(method: 'POST', url: deadUrl),
+        );
+        await h.until(() => h.of<TaskDeferred>().isNotEmpty);
+        final deferred = h.of<TaskDeferred>().single;
+        expect(deferred.reason, DeferralReason.gateError);
+        expect(deferred.name, 'network');
+        final stored = (await h.queue.getTask(id))!;
+        expect(stored.status, TaskStatus.pending);
+        expect(stored.attempts, 0);
+        expect(h.of<TaskFailed>(), isEmpty);
+        await h.queue.close();
+      },
+    );
+
+    test('per-host limits give each host its own budget', () async {
+      final other = await ScriptedServer.start();
+      server.script('/a', [respond(200)]);
+      other.script('/b', [respond(200)]);
+      final h = Harness(
+        server,
+        setup: (queue) => queue.addHttpHostRateLimit(
+          RateLimit(1, per: const Duration(minutes: 1)),
+        ),
+      );
+      await h.queue.start();
+      for (final url in [server.url('/a'), server.url('/a'), other.url('/b')]) {
+        await h.queue.enqueue(HttpRequestTask(method: 'GET', url: url));
+      }
+      await h.until(() => h.of<TaskCompleted>().length == 2);
+      expect(server.received, hasLength(1));
+      expect(other.received, hasLength(1));
+      final deferred = h.of<TaskDeferred>().single;
+      expect(deferred.name, 'http-host');
+      expect(deferred.reason, DeferralReason.rateLimit);
+
+      h.clock.advance(const Duration(minutes: 1));
+      await h.until(() => h.of<TaskCompleted>().length == 3);
+      expect(server.received, hasLength(2));
+      await h.queue.close();
+      await other.close();
+    });
+
+    test('relative URLs use the Dio baseUrl for the host', () async {
+      server.script('/a', [respond(200)]);
+      final dio = Dio(BaseOptions(baseUrl: server.url('')));
+      final h = Harness(
+        server,
+        dio: dio,
+        setup: (queue) => queue.addHttpHostRateLimit(
+          RateLimit(1, per: const Duration(minutes: 1)),
+          dio: dio,
+        ),
+      );
+      await h.queue.start();
+      await h.queue.enqueue(HttpRequestTask(method: 'GET', url: '/a'));
+      await h.queue.enqueue(HttpRequestTask(method: 'GET', url: '/a'));
+      await h.until(() => h.of<TaskDeferred>().isNotEmpty);
+      expect(server.received, hasLength(1));
+      await h.queue.close();
+    });
+
+    test('rateLimit limits all queued requests together', () async {
+      server.script('/a', [respond(200)]);
+      final h = Harness(
+        server,
+        rateLimit: RateLimit(1, per: const Duration(seconds: 30)),
+      );
+      await h.queue.start();
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a')),
+      );
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a')),
+      );
+      await h.until(() => h.of<TaskDeferred>().isNotEmpty);
+      expect(
+        h.of<TaskDeferred>().single.name,
+        'type:${HttpRequestTask.taskType}',
+      );
+      await h.queue.close();
     });
   });
 }

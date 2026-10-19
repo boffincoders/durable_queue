@@ -85,6 +85,30 @@ final class HttpRequestTask extends DurableTask {
   @override
   String get type => taskType;
 
+  /// The host of a stored [HttpRequestTask], with the port when the URL
+  /// names one, for example `api.example.com` or `127.0.0.1:8080`.
+  ///
+  /// A relative URL is resolved against [baseUrl] (usually
+  /// `dio.options.baseUrl`). Returns null for tasks of other types, or when
+  /// no host can be determined.
+  static String? hostOf(StoredTask task, {String? baseUrl}) {
+    if (task.type != taskType) return null;
+    final url = task.payload['url'];
+    if (url is! String) return null;
+    final Uri resolved;
+    try {
+      final uri = Uri.parse(url);
+      resolved = uri.hasScheme || baseUrl == null || baseUrl.isEmpty
+          ? uri
+          : Uri.parse(baseUrl).resolveUri(uri);
+    } on FormatException {
+      return null;
+    }
+    final host = resolved.host.toLowerCase();
+    if (host.isEmpty) return null;
+    return resolved.hasPort ? '$host:${resolved.port}' : host;
+  }
+
   @override
   Map<String, dynamic> toJson() => {
     'method': method,
@@ -115,11 +139,21 @@ extension DurableQueueDio on DurableQueue {
   ///
   /// [onResponse] runs after each successful request; it is not persisted,
   /// so register it again on every launch. If it throws, the attempt fails.
+  ///
+  /// [requires], [deferOn], and [rateLimit] are passed to
+  /// `DurableQueue.register`: list gates such as `network` in [requires] so
+  /// requests wait while it is closed, use `rules.deferOn('network')` so a
+  /// connection error waits for the gate instead of using an attempt, and set
+  /// [rateLimit] to limit all queued requests together. For a limit per host,
+  /// use [addHttpHostRateLimit].
   void registerHttpRequests(
     Dio dio, {
     DioRetryRules rules = const DioRetryRules(),
     String idempotencyHeader = defaultIdempotencyHeader,
     HttpResponseCallback? onResponse,
+    Set<String> requires = const {},
+    DeferOnError? deferOn,
+    RateLimit? rateLimit,
   }) {
     register<HttpRequestTask>(
       type: HttpRequestTask.taskType,
@@ -143,6 +177,32 @@ extension DurableQueueDio on DurableQueue {
       },
       retryIf: rules.shouldRetry,
       retryDelay: rules.retryDelay,
+      requires: requires,
+      deferOn: deferOn,
+      rateLimit: rateLimit,
+    );
+  }
+
+  /// Limits queued [HttpRequestTask]s per host: each host gets its own
+  /// [limit], for example `RateLimit(5, per: Duration(seconds: 1))`.
+  ///
+  /// Relative URLs are resolved against [dio]'s `baseUrl`, read when each
+  /// request is about to start. Requests whose host cannot be determined
+  /// are not limited by this limit. Every attempt counts. [name] identifies
+  /// the limit in `TaskDeferred` events.
+  ///
+  /// Throws `StateError` if a limit with [name] was already added.
+  void addHttpHostRateLimit(
+    RateLimit limit, {
+    Dio? dio,
+    String name = 'http-host',
+  }) {
+    addRateLimit(
+      name,
+      limit,
+      types: {HttpRequestTask.taskType},
+      keyOf: (task) =>
+          HttpRequestTask.hostOf(task, baseUrl: dio?.options.baseUrl),
     );
   }
 }

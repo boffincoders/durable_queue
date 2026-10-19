@@ -196,7 +196,7 @@ queue.register<UploadPhotoTask>(
 
 The attempt still counts toward `maxAttempts`. Negative waits count as zero, and waits are capped at `RetryPolicy.maxSchedulableDelay`.
 
-The core does not speak HTTP. [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) provides ready-made `retryIf` and `retryDelay` rules for Dio, including `Retry-After`.
+The core does not speak HTTP. [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) provides ready-made `retryIf` and `retryDelay` rules for Dio, including `Retry-After`, plus a `deferOn` rule for network gates and per-host rate limits for queued requests.
 
 ## Deduplication and idempotency
 

@@ -36,7 +36,7 @@ await network.dispose();
 ```
 
 * While no connection is up, `upload` tasks are deferred (`TaskDeferred` with reason `gateClosed`). They keep their attempt count and start the moment a connection comes back.
-* `deferOnConnectionError` turns connection failures into a deferral instead of a failed attempt, and makes the gate check again. It matches `SocketException`, `HttpException`, `package:http`'s `ClientException`, and `TimeoutException` (pass `includeTimeouts: false` to leave timeouts to your retry policy).
+* `deferOnConnectionError` turns connection failures into a deferral instead of a failed attempt, and makes the gate check again. It matches `SocketException`, `HttpException`, `package:http`'s `ClientException`, and `TimeoutException` (pass `includeTimeouts: false` to leave timeouts to your retry policy). With Dio, use `DioRetryRules().deferOn('network')` from [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) 0.2.0 instead; it also covers queued `HttpRequestTask`s.
 * Tasks already running when the connection drops are not cancelled.
 
 ## Connected is not the same as online

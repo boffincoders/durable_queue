@@ -8,7 +8,7 @@
 dependencies:
   dio: ^5.11.1
   durable_queue: ^0.5.0
-  durable_queue_dio: ^0.1.1
+  durable_queue_dio: ^0.2.0
   durable_queue_sqlite: ^0.2.1 # optional: keep requests across restarts
 ```
 
@@ -79,28 +79,42 @@ Store the file path in the task, not the bytes; the file is read again on each a
 
 ## Wait for the network
 
-With `durable_queue` 0.5 or later, a task type can wait for a network gate instead of using attempts while offline. Map Dio's connection errors to the gate with `deferOn`:
+Queued requests can wait while the device is offline instead of using attempts, and go out as soon as it is back. Add a gate named `network`, list it in `requires`, and let `rules.deferOn` turn connection errors into a wait:
 
 ```dart
-final network = ManualQueueGate();
+const rules = DioRetryRules();
+
+final network = await ConnectivityGate.create(); // durable_queue_connectivity
 queue.addGate('network', network);
 
-queue.register<UploadTask>(
-  type: 'upload',
-  decoder: UploadTask.fromJson,
-  handler: upload,
-  retryIf: rules.shouldRetry,
-  retryDelay: rules.retryDelay,
+queue.registerHttpRequests(
+  dio,
+  rules: rules,
   requires: {'network'},
-  deferOn: (error, stackTrace) =>
-      error is DioException &&
-              error.type == DioExceptionType.connectionError
-          ? 'network'
-          : null,
+  deferOn: rules.deferOn('network'),
 );
 ```
 
-`registerHttpRequests` does not take gates; use your own task type, as above, when you need them.
+* While the gate is closed, requests are deferred (`TaskDeferred`, reason `gateClosed`) and keep their attempt count.
+* A connection error (`DioExceptionType.connectionError` or `connectionTimeout`) defers the request instead of failing it, and asks the gate to check again. Send and receive timeouts still count as attempts, because the connection was made.
+* [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity) provides a ready-made `network` gate for Flutter. `ManualQueueGate` from `durable_queue` works too, if you track connectivity yourself.
+
+The same options work for your own task types: pass `requires: {'network'}` and `deferOn: rules.deferOn('network')` to `queue.register`.
+
+## Rate limits per host
+
+Give each API host its own budget, so one busy service cannot take every slot:
+
+```dart
+queue.addHttpHostRateLimit(
+  RateLimit(5, per: Duration(seconds: 1)),
+  dio: dio, // resolves relative URLs against dio.options.baseUrl
+);
+```
+
+* Every attempt counts, retries included. A request that has to wait is deferred (`TaskDeferred`, reason `rateLimit`, name `http-host`) and keeps its place in line.
+* Hosts are compared by name and explicit port (`api.example.com`, `127.0.0.1:8080`).
+* To limit all queued requests together instead, pass `rateLimit:` to `registerHttpRequests`. For your own task types, use `queue.addRateLimit` with a `keyOf` function; `HttpRequestTask.hostOf` shows how to read a host.
 
 ## Rules
 
