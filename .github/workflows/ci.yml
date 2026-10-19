@@ -95,3 +95,24 @@ jobs:
       - run: dart pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: dart analyze --fatal-infos
+
+  durable_queue_connectivity:
+    # A Flutter package outside the Dart workspace, resolved on its own.
+    name: durable_queue_connectivity (Flutter ${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        channel: [stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_connectivity
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+      - run: flutter pub publish --dry-run

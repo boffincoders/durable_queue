@@ -45,6 +45,7 @@ dependencies:
 | [`durable_queue`](https://pub.dev/packages/durable_queue) | The engine: tasks, retries, priorities, dependencies, rate limits, gates. |
 | [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | SQLite storage that survives restarts, on Android, iOS, macOS, Windows, Linux, and the web. |
 | [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
+| [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity) | A network gate for Flutter on `connectivity_plus`, with an optional reachability check against your server. |
 
 Need an integration that is not listed? Ask in [Discussions](https://github.com/boffincoders/durable_queue/discussions).
 
@@ -320,6 +321,8 @@ connectivity.onConnectivityChanged.listen((results) {
 * Implement `QueueGate` for other conditions, such as Wi-Fi only, charging, or signed in.
 
 A connection-type report (Wi-Fi, mobile) does not prove the internet is reachable, for example behind a captive portal. `deferOn` covers that case: the request fails, the task waits, and the gate can probe.
+
+On Flutter, [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity) provides this gate ready-made: `ConnectivityGate.create()` on `connectivity_plus`, an optional `HttpProbe` against your own server, and `deferOnConnectionError('network')`.
 
 ## Cancellation and controls
 
