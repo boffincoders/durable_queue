@@ -107,6 +107,7 @@ await gate.start();
 ## Things to know
 
 * The queue runs while your app runs. Going back online does not wake a closed app.
+* With [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter), add the gate and register your task types before `DurableQueueScope` starts the queue.
 * Deferred tasks are released when the gate opens. If the gate never reports opening, the queue checks again every `gateRecheckInterval` (five minutes by default; a `DurableQueue` setting).
 * A task deferred by a connection error waits `gateErrorDelay` (30 seconds by default) unless the gate closes and reopens sooner. Deferrals do not use attempts, so if requests keep failing while the gate stays open, for example with no probe on a captive portal, the task keeps waiting instead of failing. A probe avoids that.
 

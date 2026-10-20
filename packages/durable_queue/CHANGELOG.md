@@ -1,3 +1,10 @@
+## 0.5.2
+
+Documentation only. No API or behavior changes.
+
+* README: links to `durable_queue_flutter` (app lifecycle and widgets) and
+  uses it in the Flutter section.
+
 ## 0.5.1
 
 Documentation only. No API or behavior changes.

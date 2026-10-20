@@ -25,8 +25,9 @@ The repository is a Dart pub workspace. Each published package lives in `package
 | `packages/durable_queue_sqlite` | SQLite storage |
 | `packages/durable_queue_test_support` | Shared test helpers, including the storage contract suite. Not published. |
 | `packages/durable_queue_connectivity` | Network gate for Flutter. Needs the Flutter SDK, so it is not part of the workspace: run `flutter pub get` inside its folder. |
+| `packages/durable_queue_flutter` | Flutter integration (lifecycle, widgets). Also outside the workspace: run `flutter pub get` inside its folder. |
 
-Run the checks below from inside the package you changed. For `durable_queue_connectivity`, use `flutter analyze` and `flutter test` instead of the `dart` commands.
+Run the checks below from inside the package you changed. For the Flutter packages (`durable_queue_connectivity`, `durable_queue_flutter`), use `flutter analyze` and `flutter test` instead of the `dart` commands.
 
 ## Checks
 

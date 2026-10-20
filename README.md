@@ -11,6 +11,7 @@ Work such as uploads, messages, and sync is described as data, stored through a 
 | [`durable_queue`](packages/durable_queue) | Core engine. Pure Dart, no runtime dependencies. | [![pub package](https://img.shields.io/pub/v/durable_queue.svg)](https://pub.dev/packages/durable_queue) |
 | [`durable_queue_sqlite`](packages/durable_queue_sqlite) | SQLite storage: tasks survive restarts and crashes. | [![pub package](https://img.shields.io/pub/v/durable_queue_sqlite.svg)](https://pub.dev/packages/durable_queue_sqlite) |
 | [`durable_queue_dio`](packages/durable_queue_dio) | Dio integration: HTTP retry rules, `Retry-After`, idempotency keys, cancellation, queued requests. | [![pub package](https://img.shields.io/pub/v/durable_queue_dio.svg)](https://pub.dev/packages/durable_queue_dio) |
+| [`durable_queue_flutter`](packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. | [![pub package](https://img.shields.io/pub/v/durable_queue_flutter.svg)](https://pub.dev/packages/durable_queue_flutter) |
 | [`durable_queue_connectivity`](packages/durable_queue_connectivity) | Network gate for Flutter: tasks wait while offline and start when connectivity returns, with an optional reachability check. | [![pub package](https://img.shields.io/pub/v/durable_queue_connectivity.svg)](https://pub.dev/packages/durable_queue_connectivity) |
 
 Each integration is a separate package, so the core never forces a database, an HTTP client, or Flutter on you.
@@ -30,6 +31,7 @@ The [`durable_queue` README](packages/durable_queue/README.md) has the quick sta
 packages/
   durable_queue/                core engine (published to pub.dev)
   durable_queue_connectivity/   network gate, Flutter (published to pub.dev; outside the workspace)
+  durable_queue_flutter/        Flutter integration (published to pub.dev; outside the workspace)
   durable_queue_dio/            Dio integration (published to pub.dev)
   durable_queue_sqlite/         SQLite storage (published to pub.dev)
   durable_queue_test_support/   shared test helpers (not published)

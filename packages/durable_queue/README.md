@@ -45,6 +45,7 @@ dependencies:
 | [`durable_queue`](https://pub.dev/packages/durable_queue) | The engine: tasks, retries, priorities, dependencies, rate limits, gates. |
 | [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | SQLite storage that survives restarts, on Android, iOS, macOS, Windows, Linux, and the web. |
 | [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
+| [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. |
 | [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity) | A network gate for Flutter on `connectivity_plus`, with an optional reachability check against your server. |
 
 Need an integration that is not listed? Ask in [Discussions](https://github.com/boffincoders/durable_queue/discussions).
@@ -392,32 +393,31 @@ Worker storage errors are reported as values on `queue.storageErrors` and retrie
 
 ## Using it in Flutter
 
-The core package does not depend on Flutter. A typical app creates one queue at startup, starts it, and listens to its events:
+The core package does not depend on Flutter. [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter) connects a queue to the app:
 
 ```dart
-late final DurableQueue queue;
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final dir = await getApplicationSupportDirectory(); // path_provider
-  queue = DurableQueue(storage: JsonFileStorage('${dir.path}/queue.json'));
+  final queue = DurableQueue(storage: await openStorage()); // e.g. durable_queue_sqlite
   queue.register<UploadPhotoTask>(
     type: 'upload_photo',
     decoder: UploadPhotoTask.fromJson,
     handler: (task, context) => api.upload(task.path),
   );
-  await queue.start();
-  runApp(const MyApp());
+  // Starts the queue, pauses it in the background, resumes in the foreground.
+  runApp(DurableQueueScope(queue: queue, child: const MyApp()));
 }
 
 // Anywhere in the UI:
-StreamBuilder<QueueEvent>(
-  stream: queue.events,
-  builder: (context, snapshot) => Text('${snapshot.data ?? 'idle'}'),
+QueueTaskBuilder(
+  taskId: uploadId,
+  builder: (context, task) => Text(task?.status.name ?? '...'),
 );
 ```
 
-`JsonFileStorage` is the reference adapter from `example/json_file_storage.dart`; copy it into your app or write your own (see below). The queue runs while your app's process runs. It does not wake a terminated app; call `start` again on the next launch.
+Without that package, create the queue the same way, call `await queue.start()` before `runApp`, and build UI from `queue.events`, `getTask`, and `getTasks`.
+
+The queue runs while your app's process runs. It does not wake a terminated app; it starts again on the next launch.
 
 ## Storage
 
