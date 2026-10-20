@@ -1,3 +1,8 @@
+## Unreleased
+
+* README: "How the packages fit together", a diagram of where each package
+  plugs into the engine (gates, storage, handlers, lifecycle and UI).
+
 ## 0.5.2
 
 Documentation only. No API or behavior changes.

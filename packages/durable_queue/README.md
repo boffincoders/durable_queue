@@ -98,6 +98,37 @@ Future<void> main() async {
 
 `enqueue` returns once the task is stored. The worker runs it in the background of your process and retries it if the handler throws.
 
+## How the packages fit together
+
+The core engine decides *when* each task runs. Everything else plugs into one of three slots: a **gate** decides whether a task may start now, **storage** decides where tasks live, and a **handler** does the actual work. `durable_queue_flutter` connects the queue to your app's lifecycle and UI.
+
+```text
+                    Your Flutter or Dart app
+         enqueue tasks · show status · react to results
+                               │
+  durable_queue_flutter ──────▶│  starts the queue with the app,
+  (optional)                   │  pauses it in the background,
+                               │  rebuilds widgets from tasks
+                               ▼
+ ┌─────────────────────────────────────────────────────────────┐
+ │                 durable_queue · core engine                 │
+ │  retries · priorities · dependencies · rate limits · events │
+ ├───────────────────┬───────────────────┬─────────────────────┤
+ │ Gates             │ Storage           │ Handlers            │
+ │ may a task start? │ where tasks live  │ what a task does    │
+ └─────────▲─────────┴─────────▲─────────┴──────────▲──────────┘
+           │                   │                    │
+           │                   │                    │
+ durable_queue_        durable_queue_      durable_queue_dio
+ connectivity          sqlite              HTTP requests, retry
+ waits while offline   survives restarts   rules, Retry-After
+
+ built in:             built in:           built in:
+ ManualQueueGate       MemoryQueueStorage  any async function
+```
+
+Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, the connectivity gate when work needs the network, Dio for HTTP. Your own gates, storage adapters, and handlers fit the same slots.
+
 ## How it works
 
 ```text
