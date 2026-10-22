@@ -1,3 +1,13 @@
+## 0.2.1
+
+* When a request gets a 429 or 503 with a `Retry-After` header and a per-host
+  limit exists (`addHttpHostRateLimit`), the host's bucket is held for that
+  time, so every queued request to the host waits. `registerHttpRequests`
+  takes `hostRateLimit` (default `'http-host'`, `null` to turn it off).
+* `HttpRequestTask.hostOfUrl(url, baseUrl:)`.
+* `defaultHostRateLimit` constant.
+* Requires `durable_queue` 0.5.3 or later.
+
 ## 0.2.0
 
 * `registerHttpRequests` takes `requires`, `deferOn`, and `rateLimit` and

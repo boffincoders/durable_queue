@@ -30,6 +30,15 @@ final class RateLimiter {
     _arrival[key] = base.add(_interval);
   }
 
+  /// Makes [key] wait until [until]: no start is allowed before then, and
+  /// starts resume at the steady rate (one per interval) afterwards. A later
+  /// existing hold is kept.
+  void hold(String? key, DateTime until) {
+    final arrival = until.add(_tolerance);
+    final current = _arrival[key];
+    if (current == null || current.isBefore(arrival)) _arrival[key] = arrival;
+  }
+
   /// Forgets keys whose state no longer differs from an unused key.
   void prune(DateTime now) {
     _arrival.removeWhere((_, arrival) => !arrival.isAfter(now));

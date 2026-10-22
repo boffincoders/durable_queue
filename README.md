@@ -51,7 +51,7 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.0
+  durable_queue: ^0.5.3
 ```
 
 The [`durable_queue` README](packages/durable_queue/README.md) has the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).

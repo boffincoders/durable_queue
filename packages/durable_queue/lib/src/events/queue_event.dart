@@ -35,7 +35,12 @@ final class TaskEnqueued extends QueueEvent {
     required super.occurredAt,
     this.deduplicationKey,
     this.idempotencyKey,
+    this.runAt,
   });
+
+  /// Earliest start time requested with `enqueue(runAt:)` or
+  /// `enqueue(delay:)`, or null to start as soon as possible.
+  final DateTime? runAt;
 
   /// Deduplication key stored with the task, if any.
   final String? deduplicationKey;

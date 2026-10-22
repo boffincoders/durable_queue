@@ -95,6 +95,12 @@ final class HttpRequestTask extends DurableTask {
     if (task.type != taskType) return null;
     final url = task.payload['url'];
     if (url is! String) return null;
+    return hostOfUrl(url, baseUrl: baseUrl);
+  }
+
+  /// The host of [url], resolved against [baseUrl] when relative, as
+  /// [hostOf] reports it. Returns null when no host can be determined.
+  static String? hostOfUrl(String url, {String? baseUrl}) {
     final Uri resolved;
     try {
       final uri = Uri.parse(url);
@@ -127,6 +133,10 @@ typedef HttpResponseCallback = FutureOr<void> Function(
   TaskContext context,
 );
 
+/// Name of the per-host rate limit added by
+/// `DurableQueueDio.addHttpHostRateLimit` unless another is given.
+const defaultHostRateLimit = 'http-host';
+
 /// Registers [HttpRequestTask] on a queue.
 extension DurableQueueDio on DurableQueue {
   /// Sends every [HttpRequestTask] with [dio].
@@ -139,6 +149,13 @@ extension DurableQueueDio on DurableQueue {
   ///
   /// [onResponse] runs after each successful request; it is not persisted,
   /// so register it again on every launch. If it throws, the attempt fails.
+  ///
+  /// When a response is a 429 or 503 with a `Retry-After` header that
+  /// [rules] honors, and a per-host limit named [hostRateLimit] exists (see
+  /// [addHttpHostRateLimit]), that host's bucket is held for the
+  /// `Retry-After` time, so every queued request to the host waits, not only
+  /// the one that got the answer. Pass `hostRateLimit: null` to turn this
+  /// off.
   ///
   /// [requires], [deferOn], and [rateLimit] are passed to
   /// `DurableQueue.register`: list gates such as `network` in [requires] so
@@ -154,25 +171,32 @@ extension DurableQueueDio on DurableQueue {
     Set<String> requires = const {},
     DeferOnError? deferOn,
     RateLimit? rateLimit,
+    String? hostRateLimit = defaultHostRateLimit,
   }) {
     register<HttpRequestTask>(
       type: HttpRequestTask.taskType,
       decoder: HttpRequestTask.fromJson,
       handler: (task, context) async {
-        final response = await dio.request<Object?>(
-          task.url,
-          data: task.body,
-          queryParameters: task.queryParameters,
-          options: context.withIdempotencyKey(
-            Options(
-              method: task.method,
-              headers: task.headers,
-              contentType: task.contentType,
+        final Response<Object?> response;
+        try {
+          response = await dio.request<Object?>(
+            task.url,
+            data: task.body,
+            queryParameters: task.queryParameters,
+            options: context.withIdempotencyKey(
+              Options(
+                method: task.method,
+                headers: task.headers,
+                contentType: task.contentType,
+              ),
+              header: idempotencyHeader,
             ),
-            header: idempotencyHeader,
-          ),
-          cancelToken: context.dioCancelToken(),
-        );
+            cancelToken: context.dioCancelToken(),
+          );
+        } on DioException catch (error, stackTrace) {
+          _holdHost(dio, rules, hostRateLimit, task, error, stackTrace);
+          rethrow;
+        }
         await onResponse?.call(task, response, context);
       },
       retryIf: rules.shouldRetry,
@@ -195,7 +219,7 @@ extension DurableQueueDio on DurableQueue {
   void addHttpHostRateLimit(
     RateLimit limit, {
     Dio? dio,
-    String name = 'http-host',
+    String name = defaultHostRateLimit,
   }) {
     addRateLimit(
       name,
@@ -204,5 +228,26 @@ extension DurableQueueDio on DurableQueue {
       keyOf: (task) =>
           HttpRequestTask.hostOf(task, baseUrl: dio?.options.baseUrl),
     );
+  }
+
+  void _holdHost(
+    Dio dio,
+    DioRetryRules rules,
+    String? limitName,
+    HttpRequestTask task,
+    DioException error,
+    StackTrace stackTrace,
+  ) {
+    if (limitName == null || !hasRateLimit(limitName)) return;
+    final status = error.response?.statusCode;
+    if (status != 429 && status != 503) return;
+    final wait = rules.retryDelay(error, stackTrace);
+    if (wait == null || wait <= Duration.zero) return;
+    final host = HttpRequestTask.hostOfUrl(
+      task.url,
+      baseUrl: dio.options.baseUrl,
+    );
+    if (host == null) return;
+    holdRateLimit(limitName, key: host, duration: wait);
   }
 }

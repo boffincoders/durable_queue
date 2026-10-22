@@ -1,7 +1,23 @@
-## Unreleased
+## 0.5.3
 
+New features, no breaking changes. Storage adapters and packages built for
+0.5.0 keep working.
+
+* Scheduled tasks: `enqueue(runAt:)` and `enqueue(delay:)` set the earliest
+  start; `enqueueChain` applies it to the first step. With `dependsOn`, the
+  later of both conditions decides. `TaskEnqueued.runAt` reports it. Uses the
+  existing `nextAttemptAt` field, so no storage change.
+* `drain({timeLimit, waitForScheduled})`: start, run what is ready, stop when
+  idle or at the time limit, and return a `DrainResult` (counts, reason,
+  `nextWakeAt`). For background jobs with a time budget.
+* `retryFailed({group, retryPolicy})`: retry every failed task, oldest first,
+  skipping those `retry` refuses.
+* `holdRateLimit(name, key:, duration:)` and `hasRateLimit(name)`: make every
+  task in a rate-limit bucket wait, for example after an HTTP 429. Slots
+  reserved before the hold are dropped.
 * README: "How the packages fit together", a diagram of where each package
-  plugs into the engine (gates, storage, handlers, lifecycle and UI).
+  plugs into the engine (gates, storage, handlers, lifecycle and UI); sections
+  for scheduled tasks, `drain`, `retryFailed`, and rate-limit holds.
 
 ## 0.5.2
 

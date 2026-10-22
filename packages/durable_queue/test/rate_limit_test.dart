@@ -276,4 +276,84 @@ void main() {
     expect(second.of<TaskDeferred>(), isEmpty);
     await second.queue.close();
   });
+
+  group('holdRateLimit', () {
+    test(
+      'holds one key of a keyed limit, then resumes at the steady rate',
+      () async {
+        final h = QueueHarness(maxConcurrentTasks: 10);
+        final started = <String>[];
+        h.queue.register<TypedTask>(
+          type: 'get',
+          decoder: TypedTask.decoderFor('get'),
+          handler: (task, context) async => started.add(task.value),
+        );
+        h.queue.addRateLimit(
+          'api',
+          RateLimit(2, per: const Duration(seconds: 10)),
+          keyOf: (task) => task.payload['host'] as String?,
+        );
+        expect(h.queue.hasRateLimit('api'), isTrue);
+        expect(h.queue.hasRateLimit('nope'), isFalse);
+        h.queue.holdRateLimit(
+          'api',
+          key: 'a.example',
+          duration: const Duration(minutes: 1),
+        );
+        await h.queue.enqueue(TypedTask('get', 'a1', host: 'a.example'));
+        await h.queue.enqueue(TypedTask('get', 'a2', host: 'a.example'));
+        await h.queue.enqueue(TypedTask('get', 'b1', host: 'b.example'));
+        await h.queue.start();
+        await h.until(() => started.isNotEmpty);
+        expect(started, ['b1']);
+        final deferred = h.of<TaskDeferred>();
+        expect(
+          deferred.first.until,
+          h.clock.now().add(const Duration(minutes: 1)),
+        );
+
+        h.clock.advance(const Duration(minutes: 1));
+        await h.until(() => started.length == 2);
+        expect(started.last, 'a1');
+        h.clock.advance(const Duration(seconds: 5));
+        await h.until(() => started.length == 3);
+        expect(started.last, 'a2');
+        await h.queue.close();
+      },
+    );
+
+    test('drops slots reserved before the hold', () async {
+      final h = QueueHarness();
+      final started = <String>[];
+      h.register(
+        rateLimit: RateLimit(1, per: const Duration(seconds: 10)),
+        handler: (task, context) async => started.add(task.value),
+      );
+      await h.queue.enqueue(ValueTask('a'));
+      await h.queue.enqueue(ValueTask('b'));
+      await h.queue.start();
+      await h.until(() => h.of<TaskDeferred>().isNotEmpty);
+      // b holds a slot 10 s from now; a 1-minute hold must win.
+      h.queue.holdRateLimit('type:value', duration: const Duration(minutes: 1));
+      h.clock.advance(const Duration(seconds: 10));
+      await pumpEventQueue();
+      expect(started, ['a']);
+      h.clock.advance(const Duration(seconds: 50));
+      await h.until(() => started.length == 2);
+      await h.queue.close();
+    });
+
+    test('validates its arguments', () {
+      final h = QueueHarness();
+      expect(
+        () => h.queue.holdRateLimit('missing', duration: Duration.zero),
+        throwsArgumentError,
+      );
+      h.queue.addRateLimit('x', RateLimit(1, per: const Duration(seconds: 1)));
+      expect(
+        () => h.queue.holdRateLimit('x', duration: const Duration(seconds: -1)),
+        throwsArgumentError,
+      );
+    });
+  });
 }

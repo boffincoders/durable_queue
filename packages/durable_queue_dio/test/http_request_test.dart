@@ -451,4 +451,94 @@ void main() {
       await h.queue.close();
     });
   });
+
+  group('host hold after Retry-After', () {
+    test('a 429 with Retry-After makes the whole host wait', () async {
+      final other = await ScriptedServer.start();
+      server.script('/a1', [
+        respond(429, headers: {'Retry-After': '30'}),
+        respond(200),
+      ]);
+      server.script('/a2', [respond(200)]);
+      other.script('/b1', [respond(200)]);
+      final h = Harness(
+        server,
+        setup: (queue) => queue.addHttpHostRateLimit(
+          RateLimit(5, per: const Duration(seconds: 1)),
+        ),
+      );
+      await h.queue.start();
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a1')),
+        retryPolicy: retries,
+      );
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a2')),
+      );
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: other.url('/b1')),
+      );
+
+      await h.until(() => other.received.isNotEmpty);
+      // a2 is held with the host; a1 waits for its retry.
+      expect(server.received.map((r) => r.uri.path), ['/a1']);
+      final held = h.of<TaskDeferred>().where((e) => e.name == 'http-host');
+      expect(held, isNotEmpty);
+      expect(
+        held.first.until.difference(h.clock.now()),
+        const Duration(seconds: 30),
+      );
+
+      h.clock.advance(const Duration(seconds: 31));
+      await h.until(() => h.of<TaskCompleted>().length == 3);
+      expect(server.received.map((r) => r.uri.path).toSet(), {'/a1', '/a2'});
+      await h.queue.close();
+      await other.close();
+    });
+
+    test('without a per-host limit nothing is held', () async {
+      server.script('/a1', [
+        respond(429, headers: {'Retry-After': '30'}),
+        respond(200),
+      ]);
+      server.script('/a2', [respond(200)]);
+      final h = Harness(server);
+      await h.queue.start();
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a1')),
+        retryPolicy: retries,
+      );
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a2')),
+      );
+      await h.until(() => server.received.length == 2);
+      expect(h.of<TaskDeferred>(), isEmpty);
+      await h.queue.close();
+    });
+
+    test('a 500 does not hold the host', () async {
+      server.script('/a1', [
+        respond(500, headers: {'Retry-After': '30'}),
+        respond(200),
+      ]);
+      server.script('/a2', [respond(200)]);
+      final h = Harness(
+        server,
+        setup: (queue) => queue.addHttpHostRateLimit(
+          RateLimit(5, per: const Duration(seconds: 1)),
+        ),
+      );
+      await h.queue.start();
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a1')),
+        retryPolicy: retries,
+      );
+      await h.queue.enqueue(
+        HttpRequestTask(method: 'GET', url: server.url('/a2')),
+      );
+      await h.until(() => server.received.length == 2);
+      expect(h.of<TaskDeferred>(), isEmpty);
+      await h.queue.close();
+    });
+  });
 }

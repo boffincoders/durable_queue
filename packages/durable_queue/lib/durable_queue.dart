@@ -9,6 +9,7 @@ export 'src/errors.dart';
 export 'src/events/queue_event.dart';
 export 'src/gates/queue_gate.dart';
 export 'src/limits/rate_limit.dart';
+export 'src/queue/drain_result.dart';
 export 'src/queue/durable_queue.dart';
 export 'src/queue/queue_run_state.dart';
 export 'src/registry/task_handler.dart';

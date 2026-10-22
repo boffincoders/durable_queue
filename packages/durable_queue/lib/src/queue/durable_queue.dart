@@ -20,6 +20,7 @@ import '../task/stored_task.dart';
 import '../task/task_context.dart';
 import '../task/task_failure.dart';
 import '../task/task_status.dart';
+import 'drain_result.dart';
 import 'queue_run_state.dart';
 
 /// Supplies the `[0, 1)` fraction used by jitter.
@@ -166,6 +167,9 @@ final class DurableQueue {
   final Map<String, _GateEntry> _gates = {};
   final Map<String, _SharedLimit> _sharedLimits = {};
   final Map<String, RateLimiter> _typeLimiters = {};
+
+  Completer<void>? _activity;
+  _DrainStats? _drainStats;
 
   /// Rate-limit slots already taken for deferred tasks, by task id.
   final Map<String, ({DateTime slot, Set<String> buckets})> _reservations = {};
@@ -353,10 +357,18 @@ final class DurableQueue {
   ///
   /// [group] is a label for [getTasks] and [cancelGroup].
   ///
+  /// [runAt] or [delay] (not both) sets the earliest time the task may
+  /// start, for example "send this reminder at 9:00" or "try again in an
+  /// hour". The task is stored at once and counts as active (it holds its
+  /// deduplication key) while it waits. A time in the past means "now". With
+  /// [dependsOn], the task starts when both its dependencies have completed
+  /// and its time has come.
+  ///
   /// Throws [UnknownTaskTypeException] if [task]'s type is not registered,
   /// [TaskNotFoundException] if a [dependsOn] id is not stored, and
-  /// [ArgumentError] if the payload is not JSON-encodable or a key, group,
-  /// or dependency id is empty.
+  /// [ArgumentError] if the payload is not JSON-encodable, a key, group,
+  /// or dependency id is empty, both [runAt] and [delay] are given, or
+  /// [delay] is negative.
   Future<String> enqueue(
     DurableTask task, {
     RetryPolicy? retryPolicy,
@@ -367,6 +379,8 @@ final class DurableQueue {
     DependencyFailurePolicy onDependencyFailure =
         DependencyFailurePolicy.cancel,
     String? group,
+    DateTime? runAt,
+    Duration? delay,
   }) async {
     _ensureOpen();
     final request = _prepare(
@@ -378,6 +392,7 @@ final class DurableQueue {
       dependsOn: dependsOn,
       onDependencyFailure: onDependencyFailure,
       group: group,
+      runAt: _runAt(runAt, delay),
     );
     final events = <QueueEvent>[];
     final id = await _lock.synchronized(() => _store(request, events));
@@ -397,6 +412,9 @@ final class DurableQueue {
   /// [DependencyFailurePolicy.cancel], a step that fails or is cancelled
   /// cancels the rest of the chain.
   ///
+  /// [runAt] or [delay] sets the earliest start of the first task; the
+  /// others follow it as usual.
+  ///
   /// Every task is validated before anything is stored, and the chain is
   /// stored in one serialized operation. A storage error part-way through
   /// can still leave the first steps stored; they are returned by
@@ -412,11 +430,14 @@ final class DurableQueue {
     DependencyFailurePolicy onDependencyFailure =
         DependencyFailurePolicy.cancel,
     String? group,
+    DateTime? runAt,
+    Duration? delay,
   }) async {
     _ensureOpen();
     if (tasks.isEmpty) {
       throw ArgumentError.value(tasks, 'tasks', 'Must not be empty');
     }
+    final firstRunAt = _runAt(runAt, delay);
     final requests = [
       for (var i = 0; i < tasks.length; i++)
         _prepare(
@@ -426,6 +447,7 @@ final class DurableQueue {
           onDependencyFailure: onDependencyFailure,
           group: group,
           dependsOn: i == 0 ? dependsOn : const [],
+          runAt: i == 0 ? firstRunAt : null,
         ),
     ];
     final events = <QueueEvent>[];
@@ -453,6 +475,7 @@ final class DurableQueue {
     required Iterable<String> dependsOn,
     required DependencyFailurePolicy onDependencyFailure,
     required String? group,
+    DateTime? runAt,
   }) {
     if (task.type.isEmpty) {
       throw ArgumentError.value(task.type, 'type', 'Must not be empty');
@@ -479,7 +502,22 @@ final class DurableQueue {
       dependsOn: dependencies,
       onDependencyFailure: onDependencyFailure,
       group: group,
+      runAt: runAt,
     );
+  }
+
+  /// Turns `enqueue(runAt:, delay:)` into an absolute time, or null.
+  DateTime? _runAt(DateTime? runAt, Duration? delay) {
+    if (runAt != null && delay != null) {
+      throw ArgumentError('Pass runAt or delay, not both');
+    }
+    if (delay != null) {
+      if (delay.isNegative) {
+        throw ArgumentError.value(delay, 'delay', 'Must not be negative');
+      }
+      return _clock.now().add(delay);
+    }
+    return runAt;
   }
 
   /// Stores one prepared task. Must run inside [_lock].
@@ -523,6 +561,7 @@ final class DurableQueue {
         dependsOn: request.dependsOn,
         onDependencyFailure: request.onDependencyFailure,
         group: request.group,
+        nextAttemptAt: request.runAt,
       ),
       verdict,
       now,
@@ -535,6 +574,7 @@ final class DurableQueue {
         occurredAt: now,
         deduplicationKey: request.deduplicationKey,
         idempotencyKey: request.idempotencyKey,
+        runAt: request.runAt,
       ),
     );
     final event = stored.event;
@@ -928,6 +968,174 @@ final class DurableQueue {
     });
   }
 
+  /// Starts the queue, runs it until nothing is left to do now or until
+  /// [timeLimit] has passed, then stops it.
+  ///
+  /// Use it where an app gets a limited time to work, such as a background
+  /// job started by the operating system: run what is ready, then return.
+  ///
+  /// * The queue must be idle, as for [start]. Startup recovery runs first.
+  /// * "Nothing left to do" means no handler is running and no task is
+  ///   ready to start. Tasks scheduled for later, waiting for a retry, held
+  ///   by a closed gate, or waiting for a rate-limit slot do not keep the
+  ///   drain going; [DrainResult.nextWakeAt] says when the earliest of them
+  ///   is due. With [waitForScheduled], the drain also waits for timed work
+  ///   that becomes due before [timeLimit] (without a limit: for all timed
+  ///   work).
+  /// * When [timeLimit] passes, no new task starts. Handlers already running
+  ///   are allowed to finish, so the call can return after the limit; leave
+  ///   headroom for your longest task.
+  ///
+  /// Throws [StateError] unless the queue is idle, and [ArgumentError] if
+  /// [timeLimit] is not positive. Errors from [start] are passed on.
+  Future<DrainResult> drain({
+    Duration? timeLimit,
+    bool waitForScheduled = false,
+  }) async {
+    _ensureOpen();
+    if (timeLimit != null && timeLimit <= Duration.zero) {
+      throw ArgumentError.value(timeLimit, 'timeLimit', 'Must be positive');
+    }
+    if (_runState != QueueRunState.idle) {
+      throw StateError('Cannot drain a queue from $_runState');
+    }
+    final startedAt = _clock.now();
+    final deadline = timeLimit == null ? null : startedAt.add(timeLimit);
+    final stats = _drainStats = _DrainStats();
+    QueueDelay? limit;
+    var timedOut = false;
+    var finished = false;
+    try {
+      await start();
+      if (deadline != null) {
+        final delay = limit = _clock.delayUntil(deadline);
+        unawaited(
+          delay.future.then((_) {
+            // Cancelling the delay completes it too; that is not a timeout.
+            if (finished) return;
+            timedOut = true;
+            _signalActivity();
+          }),
+        );
+      }
+      while (!timedOut) {
+        // Take the signal before checking, so activity during the check is
+        // not missed.
+        final activity = _activity ??= Completer<void>();
+        if (await _isDrained(deadline, waitForScheduled)) break;
+        if (timedOut) break;
+        await activity.future;
+      }
+    } finally {
+      finished = true;
+      limit?.cancel();
+      await stop();
+      _drainStats = null;
+    }
+    final nextWakeAt = await _lock.synchronized(_storage.getNextWakeAt);
+    return DrainResult(
+      reason: timedOut ? DrainStopReason.timeLimit : DrainStopReason.idle,
+      started: stats.started,
+      completed: stats.completed,
+      failed: stats.failed,
+      retryScheduled: stats.retryScheduled,
+      elapsed: _clock.now().difference(startedAt),
+      nextWakeAt: nextWakeAt,
+    );
+  }
+
+  Future<bool> _isDrained(DateTime? deadline, bool waitForScheduled) {
+    return _lock.synchronized(() async {
+      if (_inFlight > 0 || _pumping) return false;
+      if (_runState != QueueRunState.running) return false;
+      final now = _clock.now();
+      final ready = await _retryStorage(
+        () => _storage.getNextReady(now),
+        'getNextReady',
+      );
+      if (ready != null) return false;
+      if (!waitForScheduled) return true;
+      final wake = await _retryStorage(
+        () => _storage.getNextWakeAt(),
+        'getNextWakeAt',
+      );
+      if (wake == null) return true;
+      return deadline != null && wake.isAfter(deadline);
+    });
+  }
+
+  /// Puts every [TaskStatus.failed] task back in the queue, oldest first,
+  /// and returns the ids that were retried.
+  ///
+  /// Failed tasks are this queue's dead-letter queue: they stay stored with
+  /// their last error until retried, deleted, or purged. Each task is
+  /// retried as by [retry], with a fresh attempt budget and, if given,
+  /// [retryPolicy]. Pass [group] to retry only that group. Tasks [retry]
+  /// refuses (for example a dependency that did not complete, a
+  /// deduplication key held by another active task, or a type that is no
+  /// longer registered) are skipped and stay failed.
+  Future<List<String>> retryFailed({
+    String? group,
+    RetryPolicy? retryPolicy,
+  }) async {
+    _ensureOpen();
+    final failed = await getTasks(status: TaskStatus.failed, group: group);
+    final retried = <String>[];
+    for (final task in failed) {
+      try {
+        await retry(task.id, retryPolicy: retryPolicy);
+        retried.add(task.id);
+      } on StateError {
+        continue;
+      } on UnknownTaskTypeException {
+        continue;
+      }
+    }
+    return retried;
+  }
+
+  /// Whether a rate limit named [name] exists: one added with
+  /// [addRateLimit], or `type:<task type>` for `register(rateLimit:)`.
+  bool hasRateLimit(String name) {
+    if (_sharedLimits.containsKey(name)) return true;
+    return name.startsWith('type:') &&
+        _typeLimiters.containsKey(name.substring(5));
+  }
+
+  /// Stops rate limit [name] from starting tasks for [duration], for one
+  /// [key] of a keyed limit or for the whole limit when [key] is null.
+  ///
+  /// Use it when a service says "slow down", for example an HTTP 429 with
+  /// `Retry-After`: every task in that bucket waits, not only the one that
+  /// got the answer. Tasks that already hold a later slot keep it. After the
+  /// hold, starts resume at the limit's steady rate (`per / count` apart),
+  /// not with a burst.
+  ///
+  /// Throws [ArgumentError] if no such limit exists or [duration] is
+  /// negative.
+  void holdRateLimit(String name, {String? key, required Duration duration}) {
+    _ensureOpen();
+    if (duration.isNegative) {
+      throw ArgumentError.value(duration, 'duration', 'Must not be negative');
+    }
+    final RateLimiter limiter;
+    final shared = _sharedLimits[name];
+    if (shared != null) {
+      limiter = shared.limiter;
+    } else if (name.startsWith('type:') &&
+        _typeLimiters.containsKey(name.substring(5))) {
+      limiter = _typeLimiters[name.substring(5)]!;
+    } else {
+      throw ArgumentError.value(name, 'name', 'No such rate limit');
+    }
+    limiter.hold(key, _clock.now().add(duration));
+    // Slots reserved before the hold would let tasks through early.
+    final bucket = _Bucket(limiter, key, name).id;
+    _reservations.removeWhere(
+      (_, reservation) => reservation.buckets.contains(bucket),
+    );
+  }
+
   /// Stops the queue, then closes [events] and [storageErrors].
   ///
   /// Waits like [stop]. Afterwards [register], [enqueue], [enqueueChain],
@@ -1002,12 +1210,10 @@ final class DurableQueue {
           null,
         );
       case _VerdictKind.ready:
+        // A start time from enqueue(runAt:) is kept; otherwise
+        // nextAttemptAt is null and the task is ready at once.
         return _Resolved(
-          task.copyWith(
-            status: TaskStatus.pending,
-            updatedAt: now,
-            nextAttemptAt: null,
-          ),
+          task.copyWith(status: TaskStatus.pending, updatedAt: now),
           null,
         );
       case _VerdictKind.cancel:
@@ -1214,6 +1420,14 @@ final class DurableQueue {
       _pumping = false;
     }
     if (_runState == QueueRunState.running) await _armNextWake();
+    _signalActivity();
+  }
+
+  /// Wakes a pending [drain] so it checks whether the queue is done.
+  void _signalActivity() {
+    final activity = _activity;
+    _activity = null;
+    if (activity != null && !activity.isCompleted) activity.complete();
   }
 
   /// Claims the next ready task, or defers it when a gate or rate limit does
@@ -1828,6 +2042,7 @@ final class DurableQueue {
   void _exitFlight() {
     _inFlight--;
     if (_inFlight < 0) _inFlight = 0;
+    _signalActivity();
     if (_inFlight == 0) {
       final drain = _drain;
       _drain = null;
@@ -1879,6 +2094,7 @@ final class DurableQueue {
   }
 
   void _emit(QueueEvent event) {
+    _drainStats?.count(event);
     if (!_events.isClosed) _events.add(event);
   }
 
@@ -1931,6 +2147,7 @@ final class _EnqueueRequest {
     required this.dependsOn,
     required this.onDependencyFailure,
     required this.group,
+    this.runAt,
   });
 
   final String type;
@@ -1942,6 +2159,7 @@ final class _EnqueueRequest {
   final List<String> dependsOn;
   final DependencyFailurePolicy onDependencyFailure;
   final String? group;
+  final DateTime? runAt;
 
   _EnqueueRequest withDependencies(List<String> dependencies) {
     return _EnqueueRequest(
@@ -1954,6 +2172,7 @@ final class _EnqueueRequest {
       dependsOn: List<String>.unmodifiable(dependencies),
       onDependencyFailure: onDependencyFailure,
       group: group,
+      runAt: runAt,
     );
   }
 }
@@ -2040,4 +2259,27 @@ final class _Claim {
 
   final StoredTask? claimed;
   final TaskDeferred? deferred;
+}
+
+/// Counts events while [DurableQueue.drain] runs.
+final class _DrainStats {
+  var started = 0;
+  var completed = 0;
+  var failed = 0;
+  var retryScheduled = 0;
+
+  void count(QueueEvent event) {
+    switch (event) {
+      case TaskStarted():
+        started++;
+      case TaskCompleted():
+        completed++;
+      case TaskFailed():
+        failed++;
+      case TaskRetryScheduled():
+        retryScheduled++;
+      default:
+        break;
+    }
+  }
 }

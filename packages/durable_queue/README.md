@@ -19,11 +19,13 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Tasks are data, so they can be stored and rebuilt after a restart
 * Fixed and exponential retry with optional jitter, and a `retryIf` filter
 * Concurrency limits and priorities
+* Scheduled tasks: start at a given time or after a delay
 * Rate limits per task type, or per key such as an API host
 * Gates: tasks that need the network wait while offline, without using attempts
 * Task dependencies, chains, and groups
 * Deduplication and idempotency keys
 * Cooperative cancellation, pause, resume, and stop
+* `drain`: run what is ready within a time limit, for background jobs
 * Lifecycle events and queries by status or group
 * Startup recovery of tasks interrupted by a crash
 * An injectable clock, so retry logic is testable without waiting
@@ -33,7 +35,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.0
+  durable_queue: ^0.5.3
 ```
 
 ## Packages
@@ -244,6 +246,19 @@ If a task with that deduplication key is already `pending`, `waiting`, `running`
 
 The idempotency key is stored and exposed on `TaskContext`. The handler decides how to send it. The same key does not, by itself, collapse two tasks.
 
+## Scheduled tasks
+
+Give a task an earliest start time with `runAt` or `delay`:
+
+```dart
+await queue.enqueue(SendReminderTask(id), runAt: DateTime(2026, 11, 1, 9));
+await queue.enqueue(SyncTask(), delay: Duration(minutes: 15));
+```
+
+The task is stored at once and starts when its time comes and a slot is free. While it waits it is `pending`, counts as active, and holds its deduplication key. A time in the past means "now". With `dependsOn`, the task starts once its dependencies have completed and its time has come. `enqueueChain` applies the time to the first step.
+
+The queue only runs while your app runs: a task scheduled for 3 a.m. starts at 3 a.m. if the app is running then, or on the next launch otherwise.
+
 ## Priorities
 
 ```dart
@@ -323,6 +338,14 @@ queue.addRateLimit(
 
 Up to `count` tasks may start back to back, then starts are spaced by `per / count`. A task that has to wait is deferred: it keeps its status, attempt count, and place in line, and gets a reserved slot, so it is rescheduled once rather than polled. Other task types keep running meanwhile. A task must satisfy every limit that applies to it. Limits live in memory and start empty after a restart.
 
+When a service asks you to slow down, hold a limit so every task in that bucket waits, not only the one that got the answer:
+
+```dart
+queue.holdRateLimit('per-host', key: 'api.example.com', duration: Duration(seconds: 30));
+```
+
+After the hold, starts resume at the steady rate. `durable_queue_dio` does this for you when a server answers 429 or 503 with `Retry-After`.
+
 ## Gates: waiting for the network and other conditions
 
 A gate is a condition a task type needs before it starts, such as network access. While a required gate is closed, matching tasks are deferred without using attempts, other work keeps running, and the deferred tasks start as soon as the gate opens.
@@ -397,6 +420,12 @@ final removed = await queue.purge(
 );
 ```
 
+Failed tasks are the queue's dead-letter queue: they stay stored, with their last error in `lastFailure`, until you retry, delete, or purge them. To retry them all at once, for example after a server outage:
+
+```dart
+final retried = await queue.retryFailed(); // or retryFailed(group: 'uploads')
+```
+
 `retry` keeps the task id, payload, keys, priority, group, and dependencies, and can take a new `retryPolicy`. It refuses tasks that are still active, refuses when another active task already holds the same deduplication key, and refuses when a dependency did not complete (retry that dependency first). Tasks cancelled because a dependency failed are not revived automatically. `delete` and `purge` only touch terminal tasks, and never remove a task that a waiting task still depends on.
 
 When the queue is no longer needed, `close` stops it and closes the `events` and `storageErrors` streams:
@@ -405,11 +434,26 @@ When the queue is no longer needed, `close` stops it and closes the `events` and
 await queue.close();
 ```
 
+## Running in a limited time window
+
+`drain` starts the queue, runs what is ready, and stops when nothing is left to start or a time limit passes. Use it where the app gets a short window to work, such as a background job started by the operating system:
+
+```dart
+final result = await queue.drain(timeLimit: Duration(seconds: 25));
+print('${result.completed} done, ${result.failed} failed, stopped: ${result.reason.name}');
+// result.nextWakeAt: when the next scheduled task, retry, or deferral is due.
+```
+
+* Tasks scheduled for later, retries, and tasks held by a gate or rate limit do not keep the drain going. Pass `waitForScheduled: true` to also wait for timed work due before the limit.
+* At the limit no new task starts; tasks already running finish first, so leave headroom for your longest task.
+* The queue must be idle when `drain` is called, and is idle again when it returns.
+
 ## Observation
 
 ```dart
 queue.events.listen((event) {
-  // TaskEnqueued, TaskStarted, TaskRetryScheduled, TaskDeferred,
+  // TaskEnqueued (with runAt for scheduled tasks), TaskStarted,
+  // TaskRetryScheduled, TaskDeferred,
   // TaskCompleted, TaskFailed, TaskCancelled
 });
 

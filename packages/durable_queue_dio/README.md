@@ -7,8 +7,8 @@
 ```yaml
 dependencies:
   dio: ^5.11.1
-  durable_queue: ^0.5.0
-  durable_queue_dio: ^0.2.0
+  durable_queue: ^0.5.3
+  durable_queue_dio: ^0.2.1
   durable_queue_sqlite: ^0.2.1 # optional: keep requests across restarts
 ```
 
@@ -114,6 +114,7 @@ queue.addHttpHostRateLimit(
 
 * Every attempt counts, retries included. A request that has to wait is deferred (`TaskDeferred`, reason `rateLimit`, name `http-host`) and keeps its place in line.
 * Hosts are compared by name and explicit port (`api.example.com`, `127.0.0.1:8080`).
+* When a host answers 429 or 503 with `Retry-After`, every queued request to that host waits that long, not only the one that got the answer (requires `durable_queue` 0.5.3). Pass `hostRateLimit: null` to `registerHttpRequests` to turn this off.
 * To limit all queued requests together instead, pass `rateLimit:` to `registerHttpRequests`. For your own task types, use `queue.addRateLimit` with a `keyOf` function; `HttpRequestTask.hostOf` shows how to read a host.
 
 ## Rules

@@ -1,6 +1,6 @@
 name: durable_queue_dio
 description: Dio integration for durable_queue. Retry rules for HTTP errors, Retry-After, idempotency headers, cancellation, and queued HTTP requests.
-version: 0.2.0
+version: 0.2.1
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_dio
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:
@@ -17,7 +17,7 @@ resolution: workspace
 
 dependencies:
   dio: ^5.11.1
-  durable_queue: '>=0.5.0 <0.6.0'
+  durable_queue: '>=0.5.3 <0.6.0'
   http_parser: ^4.1.2
 
 dev_dependencies:
