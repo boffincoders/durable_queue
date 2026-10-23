@@ -128,10 +128,10 @@ Future<void> run(DemoServer server, int count) async {
       throw StateError('$name was announced but never uploaded');
     }
   }
-  final reuploaded = server.uploads.entries.where((e) => e.value > 1).length;
+  final resent = server.uploadAttempts.entries.where((e) => e.value > 1).length;
   log(
     'PASSED: $count photos uploaded and announced once each '
-    '($reuploaded uploaded again after the kill, allowed: at least once)',
+    '($resent sent again after the kill, allowed: at least once)',
   );
 }
 

@@ -48,7 +48,7 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 | Device | What the test does | Result |
 | --- | --- | --- |
-| Android 14 emulator (API 34) | Kills the app process with 6 uploads in flight; relaunches it offline (nothing may be sent), then online | All 6 uploaded, each follow-up exactly once; the 6 cut-off uploads were sent again (at least once) |
-| iOS simulator (iPhone 17 Pro) | Terminates the app just as its 6 uploads finish; relaunches it | All 6 uploaded once, each follow-up exactly once |
+| Android 14 emulator (API 34) | Kills the app process (`kill -9`) with 6 uploads in flight; relaunches it with the network off for 15 seconds, then on | Nothing was sent while offline. All 6 uploads completed and each follow-up ran exactly once. The cut-off uploads were sent a second time after the network returned. |
+| iOS 26.5 simulator (iPhone 17 Pro) | Terminates the app with 6 uploads in flight; relaunches it | The uploads kept going while the app was terminated, each sent once. All 6 completed and each follow-up ran exactly once. |
 
 These are emulators and simulators; real phones can differ, for example in how aggressively they stop apps in the background. Results of every run are on the [Actions page](https://github.com/boffincoders/durable_queue/actions/workflows/device-tests.yml).
