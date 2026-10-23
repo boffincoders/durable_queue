@@ -1,3 +1,22 @@
+## 0.5.4
+
+New features, no breaking changes. Storage adapters and packages built for
+0.5.0 keep working; adapters must persist the new `StoredTask` field (see
+STORAGE.md).
+
+* Hand-off for work that finishes outside the queue, such as an upload run
+  by the operating system: `TaskContext.handOff(reference)` keeps the task
+  running after its handler returns, without a concurrency slot and across
+  restarts, until `completeHandOff(id, reference:)` or
+  `failHandOff(id, error, reference:)` reports the outcome. Failures follow
+  the type's retry rules. `cancel` cancels a handed-off task at once.
+* `StoredTask.handOffReference` and `StoredTask.isHandedOff`.
+* Startup recovery skips handed-off tasks and still reads running tasks in
+  bounded batches.
+* README: hand-off section; links to `durable_queue_workmanager` and
+  `durable_queue_transfer` in the package table, the package diagram, the
+  `drain` section, and the Flutter section.
+
 ## 0.5.3
 
 New features, no breaking changes. Storage adapters and packages built for

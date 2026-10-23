@@ -342,4 +342,23 @@ void queueStorageContractTests(QueueStorage Function() create) {
     expect(loaded?.onDependencyFailure, DependencyFailurePolicy.run);
     expect(loaded?.group, 'g');
   });
+
+  test('a hand-off reference persists through updates', () async {
+    await storage.save(
+      storedTask(
+        id: 'a',
+        status: TaskStatus.running,
+        attempts: 1,
+        handOffReference: 'transfer-1',
+      ),
+    );
+    expect((await storage.get('a'))?.handOffReference, 'transfer-1');
+    expect(
+      (await storage.getByStatus(TaskStatus.running)).single.handOffReference,
+      'transfer-1',
+    );
+    final loaded = (await storage.get('a'))!;
+    await storage.update(loaded.copyWith(handOffReference: null));
+    expect((await storage.get('a'))?.handOffReference, isNull);
+  });
 }

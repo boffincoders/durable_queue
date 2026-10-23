@@ -1,3 +1,13 @@
+## 0.2.2
+
+* Several connections to the same database file, for example the app and a
+  background isolate, can now write at the same time. Writes take the write
+  lock up front (`BEGIN IMMEDIATE`) and wait for each other instead of
+  failing with `database is locked`. Inside a transaction the app already
+  opened, writes still use a savepoint.
+* The busy timeout is set before the other settings, so opening a new file
+  from two isolates at once waits instead of failing.
+
 ## 0.2.1
 
 * Allow `durable_queue` 0.5.x (`>=0.3.1 <0.6.0`). No code or schema change.

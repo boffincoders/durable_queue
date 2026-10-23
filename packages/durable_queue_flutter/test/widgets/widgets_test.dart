@@ -98,6 +98,35 @@ void main() {
     await queue.close();
   });
 
+  testWidgets('with runQueue false the scope only provides the queue', (
+    tester,
+  ) async {
+    final queue = newQueue();
+    DurableQueue? found;
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: DurableQueueScope(
+          queue: queue,
+          runQueue: false,
+          child: Builder(
+            builder: (context) {
+              found = DurableQueueScope.of(context);
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+    expect(found, same(queue));
+    expect(queue.runState, QueueRunState.idle);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+    expect(queue.isClosed, isFalse);
+    await queue.close();
+  });
+
   testWidgets('maybeOf is null without a scope', (tester) async {
     DurableQueue? found;
     var called = false;

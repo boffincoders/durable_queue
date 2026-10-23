@@ -1,6 +1,6 @@
 name: durable_queue_flutter
 description: Flutter integration for durable_queue. Start the queue with the app, pause it in the background, and rebuild widgets from stored tasks.
-version: 0.1.0
+version: 0.1.1
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_flutter
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:

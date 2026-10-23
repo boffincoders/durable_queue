@@ -23,6 +23,10 @@ import 'watch.dart';
 ///
 /// [onStartError] receives errors from starting the queue, such as a failed
 /// recovery. Without it they are reported through [FlutterError].
+///
+/// With [runQueue] set to false the scope only provides the queue and does
+/// not start, pause, or resume it. Use that when something else runs the
+/// queue, such as a `LeasedQueueRunner` from `durable_queue_workmanager`.
 class DurableQueueScope extends StatefulWidget {
   /// Creates a scope for [queue].
   const DurableQueueScope({
@@ -32,6 +36,7 @@ class DurableQueueScope extends StatefulWidget {
     this.pauseInBackground = true,
     this.closeOnDispose = false,
     this.onStartError,
+    this.runQueue = true,
   });
 
   /// The queue provided to [child].
@@ -45,6 +50,10 @@ class DurableQueueScope extends StatefulWidget {
 
   /// Whether the queue is closed when this scope is removed.
   final bool closeOnDispose;
+
+  /// Whether this scope starts the queue and follows the app lifecycle.
+  /// When false, [pauseInBackground] and [onStartError] are not used.
+  final bool runQueue;
 
   /// Called when starting the queue fails.
   final void Function(Object error, StackTrace stackTrace)? onStartError;
@@ -87,13 +96,15 @@ class _DurableQueueScopeState extends State<DurableQueueScope> {
   void didUpdateWidget(DurableQueueScope oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!identical(oldWidget.queue, widget.queue) ||
-        oldWidget.pauseInBackground != widget.pauseInBackground) {
+        oldWidget.pauseInBackground != widget.pauseInBackground ||
+        oldWidget.runQueue != widget.runQueue) {
       _detach(oldWidget.queue, close: oldWidget.closeOnDispose);
       _attach();
     }
   }
 
   void _attach() {
+    if (!widget.runQueue) return;
     final queue = widget.queue;
     _lifecycle =
         DurableQueueLifecycle.attach(

@@ -1,3 +1,9 @@
+## 0.1.1
+
+* `DurableQueueScope(runQueue: false)`: the scope only provides the queue
+  and does not start, pause, or resume it. Use it when something else runs
+  the queue, such as `LeasedQueueRunner` from `durable_queue_workmanager`.
+
 ## 0.1.0
 
 * Initial release.

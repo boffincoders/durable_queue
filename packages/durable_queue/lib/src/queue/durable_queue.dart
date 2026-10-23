@@ -74,6 +74,13 @@ String _defaultTaskId() {
 ///   every other task stored. [stop] does not complete if a handler never
 ///   returns.
 ///
+/// ## Work that continues outside the queue
+///
+/// A handler can start work that the operating system finishes, such as a
+/// background upload, and call [TaskContext.handOff]. The task then stays
+/// running, without a concurrency slot and across restarts, until
+/// [completeHandOff] or [failHandOff] reports the outcome.
+///
 /// ## Rate limits and gates
 ///
 /// [register] takes a `rateLimit` for one task type, and [addRateLimit] adds
@@ -180,6 +187,9 @@ final class DurableQueue {
       StreamController<QueueStorageFailure>.broadcast();
   final Set<String> _cancelRequested = {};
   final Map<String, Completer<void>> _cancelSignals = {};
+
+  /// Hand-offs made by handlers that have not returned yet, by task id.
+  final Map<String, _PendingHandOff> _pendingHandOffs = {};
 
   QueueRunState _runState = QueueRunState.idle;
   var _inFlight = 0;
@@ -589,7 +599,8 @@ final class DurableQueue {
   /// attempt budget is spent, the task fails with [TaskInterruptedException].
   /// Otherwise it is scheduled using its retry policy. A running task whose
   /// cancellation was already requested is marked cancelled and is not
-  /// retried.
+  /// retried. Tasks handed off with [TaskContext.handOff] are not
+  /// interrupted: they keep running outside the queue and are left alone.
   ///
   /// A recovered task that fails or is cancelled also settles the tasks
   /// waiting on it.
@@ -608,15 +619,25 @@ final class DurableQueue {
       }
       // Recovery is serialized while still idle. No timers or handlers start
       // until every batch succeeds; a failure leaves start safe to retry.
+      // Batches of 100. Handed-off tasks stay running, so each batch asks
+      // for the ones already seen plus 100 more.
+      final handedOff = <String>{};
       while (true) {
+        final limit = handedOff.length + 100;
         final running = await _storage.getByStatus(
           TaskStatus.running,
-          limit: 100,
+          limit: limit,
         );
-        if (running.isEmpty) break;
+        var recovered = 0;
         for (final task in running) {
+          if (task.handOffReference != null) {
+            handedOff.add(task.id);
+            continue;
+          }
           _emitAll(await _commit(_recoverInterrupted(task), _direct));
+          recovered++;
         }
+        if (recovered == 0 && running.length < limit) break;
       }
       _runState = QueueRunState.running;
     });
@@ -757,6 +778,12 @@ final class DurableQueue {
         events.addAll(await _commit(cancelled, _direct));
         return true;
       case TaskStatus.running:
+        if (task.isHandedOff && !_cancelSignals.containsKey(task.id)) {
+          // Nothing in this process runs it; the outside work is told by the
+          // event.
+          events.addAll(await _commit(_handedOffCancelled(task, now), _direct));
+          return true;
+        }
         if (!task.cancelRequested) {
           await _storage.update(
             task.copyWith(cancelRequested: true, updatedAt: now),
@@ -770,6 +797,75 @@ final class DurableQueue {
       case TaskStatus.cancelled:
         return false;
     }
+  }
+
+  /// Completes a task that was handed off with [TaskContext.handOff], when
+  /// the outside work succeeded. Tasks waiting on it are released.
+  ///
+  /// Pass the [reference] the handler gave, so an outcome meant for an
+  /// earlier attempt is not applied to a later one. Returns false, and
+  /// changes nothing, when the task is not handed off (any more) under that
+  /// reference: unknown, already finished or cancelled, or running a new
+  /// attempt. That makes repeated reports of the same outcome harmless.
+  ///
+  /// An outcome reported while the handler that handed off is still running
+  /// is applied as soon as it returns, unless it throws.
+  Future<bool> completeHandOff(String id, {String? reference}) {
+    return _resolveHandOff(id, reference, null, null);
+  }
+
+  /// Fails a task that was handed off with [TaskContext.handOff], as if its
+  /// handler had thrown [error]: the type's `retryIf`, `retryDelay`, and
+  /// `deferOn` rules and the retry policy decide whether it is retried
+  /// (running the handler again), deferred, or failed for good. A
+  /// [TaskCancelledException] cancels it.
+  ///
+  /// [reference] and the return value work as for [completeHandOff].
+  Future<bool> failHandOff(
+    String id,
+    Object error, {
+    StackTrace? stackTrace,
+    String? reference,
+  }) {
+    return _resolveHandOff(
+      id,
+      reference,
+      error,
+      stackTrace ?? StackTrace.current,
+    );
+  }
+
+  Future<bool> _resolveHandOff(
+    String id,
+    String? reference,
+    Object? error,
+    StackTrace? stackTrace,
+  ) async {
+    _ensureOpen();
+    final pending = _pendingHandOffs[id];
+    if (pending != null) {
+      if (reference != null && reference != pending.reference) return false;
+      if (pending.outcome != null) return false;
+      pending.outcome = _HandOffOutcome(error, stackTrace);
+      return true;
+    }
+    final current = await _lock.synchronized(() => _storage.get(id));
+    if (current == null ||
+        !current.isHandedOff ||
+        _cancelSignals.containsKey(id) ||
+        (reference != null && reference != current.handOffReference)) {
+      return false;
+    }
+    final changed = error == null
+        ? await _markCompleted(current)
+        : await _failHandedOff(
+            current,
+            _registry.find(current.type),
+            error,
+            stackTrace ?? StackTrace.empty,
+          );
+    if (changed && _runState == QueueRunState.running) unawaited(_pump());
+    return changed;
   }
 
   /// Emits [events] and lets a running queue pick up released work.
@@ -1468,6 +1564,7 @@ final class DurableQueue {
       attempts: task.attempts + 1,
       updatedAt: now,
       nextAttemptAt: null,
+      handOffReference: null,
     );
     await _retryStorage(() => _storage.update(claimed), 'update');
     return _Claim.claimed(claimed);
@@ -1669,6 +1766,7 @@ final class DurableQueue {
       return;
     }
 
+    var handlerDone = false;
     final cancelSignal = _cancelSignals[claimed.id] = Completer<void>();
     if (_cancelRequested.contains(claimed.id)) cancelSignal.complete();
     final context = TaskContext(
@@ -1679,25 +1777,159 @@ final class DurableQueue {
       deduplicationKey: claimed.deduplicationKey,
       isCancellationRequested: () => _cancelRequested.contains(claimed.id),
       whenCancellationRequested: cancelSignal.future,
+      onHandOff: (reference) {
+        if (handlerDone) {
+          throw StateError(
+            'The handler for ${claimed.id} has already returned',
+          );
+        }
+        _recordHandOff(claimed, reference);
+      },
     );
 
     try {
       await registration.handle(decoded, context);
     } on TaskCancelledException catch (error, stackTrace) {
+      await _dropHandOff(claimed.id);
       await _markCancelled(claimed, error, stackTrace);
       return;
     } on Object catch (error, stackTrace) {
+      await _dropHandOff(claimed.id);
       if (_cancelRequested.contains(claimed.id)) {
         await _markCancelled(claimed, error, stackTrace);
         return;
       }
       await _handleFailure(claimed, registration, error, stackTrace);
       return;
+    } finally {
+      handlerDone = true;
     }
-    await _markCompleted(claimed);
+    final handOff = _pendingHandOffs[claimed.id];
+    if (handOff == null) {
+      await _markCompleted(claimed);
+      return;
+    }
+    await _settleHandOff(claimed, registration, handOff);
   }
 
-  Future<void> _markCompleted(StoredTask claimed) async {
+  /// Records a hand-off made while [claimed]'s handler runs, and saves the
+  /// reference right away so a crash before the handler returns does not
+  /// start the outside work a second time.
+  void _recordHandOff(StoredTask claimed, String reference) {
+    if (_pendingHandOffs.containsKey(claimed.id)) {
+      throw StateError('Task ${claimed.id} was already handed off');
+    }
+    final pending = _pendingHandOffs[claimed.id] = _PendingHandOff(reference);
+    pending.saved = _lock
+        .synchronized(() async {
+          final current = await _storage.get(claimed.id);
+          if (current == null || current.status != TaskStatus.running) return;
+          if (current.attempts != claimed.attempts) return;
+          await _storage.update(
+            current.copyWith(
+              handOffReference: reference,
+              updatedAt: _clock.now(),
+            ),
+          );
+        })
+        .then<void>((_) {}, onError: (Object _) {});
+  }
+
+  /// Forgets a hand-off whose handler then threw. Its early outcome, if any,
+  /// is dropped: the throw decides.
+  Future<void> _dropHandOff(String id) async {
+    final pending = _pendingHandOffs.remove(id);
+    if (pending != null) await pending.saved;
+  }
+
+  /// After a handler that handed off returned: makes sure the reference is
+  /// stored, cancels if cancellation was requested meanwhile, then applies
+  /// an outcome that arrived while the handler still ran.
+  Future<void> _settleHandOff(
+    StoredTask claimed,
+    RegisteredTask registration,
+    _PendingHandOff handOff,
+  ) async {
+    await handOff.saved;
+    final events = await _lock.synchronized(() async {
+      final current = await _retryStorage(
+        () => _storage.get(claimed.id),
+        'get',
+      );
+      if (current == null ||
+          current.status != TaskStatus.running ||
+          current.attempts != claimed.attempts) {
+        return const <QueueEvent>[];
+      }
+      final now = _clock.now();
+      final handedOff = current.copyWith(
+        handOffReference: handOff.reference,
+        updatedAt: now,
+      );
+      if (current.cancelRequested || _cancelRequested.contains(current.id)) {
+        final events = await _commit(
+          _handedOffCancelled(handedOff, now),
+          _retryStorage,
+        );
+        _cancelRequested.remove(current.id);
+        return events;
+      }
+      if (current.handOffReference != handOff.reference) {
+        await _retryStorage(() => _storage.update(handedOff), 'update');
+      }
+      return const <QueueEvent>[];
+    });
+    _pendingHandOffs.remove(claimed.id);
+    _emitAll(events);
+    final outcome = handOff.outcome;
+    if (outcome == null || events.isNotEmpty) return;
+    if (outcome.error == null) {
+      await _markCompleted(claimed);
+    } else {
+      await _failHandedOff(
+        claimed,
+        registration,
+        outcome.error!,
+        outcome.stackTrace ?? StackTrace.empty,
+      );
+    }
+  }
+
+  _Resolved _handedOffCancelled(StoredTask task, DateTime now) {
+    return _Resolved(
+      task.copyWith(
+        status: TaskStatus.cancelled,
+        updatedAt: now,
+        nextAttemptAt: null,
+        cancelRequested: false,
+      ),
+      TaskCancelled(
+        taskId: task.id,
+        taskType: task.type,
+        occurredAt: now,
+        wasRunning: true,
+      ),
+    );
+  }
+
+  /// Applies an outside failure to a handed-off task, as if its handler had
+  /// thrown [error].
+  Future<bool> _failHandedOff(
+    StoredTask claimed,
+    RegisteredTask? registration,
+    Object error,
+    StackTrace stackTrace,
+  ) async {
+    if (error is TaskCancelledException) {
+      return _markCancelled(claimed, error, stackTrace);
+    }
+    if (registration == null) {
+      return _failPermanent(claimed, error, stackTrace);
+    }
+    return _handleFailure(claimed, registration, error, stackTrace);
+  }
+
+  Future<bool> _markCompleted(StoredTask claimed) async {
     final events = await _lock.synchronized(
       () => _transition(claimed, (current, now, _) {
         return _Transition(
@@ -1718,9 +1950,10 @@ final class DurableQueue {
       }),
     );
     _emitAll(events);
+    return events.isNotEmpty;
   }
 
-  Future<void> _markCancelled(
+  Future<bool> _markCancelled(
     StoredTask claimed,
     Object error,
     StackTrace stackTrace,
@@ -1745,9 +1978,10 @@ final class DurableQueue {
       }),
     );
     _emitAll(events);
+    return events.isNotEmpty;
   }
 
-  Future<void> _failPermanent(
+  Future<bool> _failPermanent(
     StoredTask claimed,
     Object error,
     StackTrace stackTrace,
@@ -1775,9 +2009,10 @@ final class DurableQueue {
       }),
     );
     _emitAll(events);
+    return events.isNotEmpty;
   }
 
-  Future<void> _handleFailure(
+  Future<bool> _handleFailure(
     StoredTask claimed,
     RegisteredTask registration,
     Object error,
@@ -1868,6 +2103,7 @@ final class DurableQueue {
         _gates[event.name]?.gate.recheck();
       }
     }
+    return events.isNotEmpty;
   }
 
   /// The gate [registration]'s `deferOn` assigns to [error], if it is one of
@@ -2127,6 +2363,22 @@ void _rejectBlank(String? value, String name) {
   if (value != null && value.isEmpty) {
     throw ArgumentError.value(value, name, 'Must not be empty');
   }
+}
+
+final class _PendingHandOff {
+  _PendingHandOff(this.reference);
+
+  final String reference;
+  Future<void> saved = Future<void>.value();
+  _HandOffOutcome? outcome;
+}
+
+final class _HandOffOutcome {
+  _HandOffOutcome(this.error, this.stackTrace);
+
+  /// Null for success.
+  final Object? error;
+  final StackTrace? stackTrace;
 }
 
 final class _Transition {

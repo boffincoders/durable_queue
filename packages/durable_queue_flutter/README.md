@@ -7,7 +7,7 @@ Flutter integration for [`durable_queue`](https://pub.dev/packages/durable_queue
 ```yaml
 dependencies:
   durable_queue: ^0.5.0
-  durable_queue_flutter: ^0.1.0
+  durable_queue_flutter: ^0.1.1
 ```
 
 Requires Flutter 3.13 or later.
@@ -39,6 +39,8 @@ await queue.enqueue(UploadTask(path));
 * never resumes a queue that your app paused itself;
 * when removed, stops following the lifecycle, and closes the queue if `closeOnDispose` is true.
 
+With `runQueue: false` the scope only provides the queue to the widgets below it and leaves starting and pausing to something else, such as `LeasedQueueRunner` from [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager).
+
 Startup errors, such as a failed recovery, go to `onStartError`, or to `FlutterError.reportError` when it is not set.
 
 Without a widget, use `DurableQueueLifecycle.attach(queue)` and `dispose()` it when done.
@@ -47,7 +49,7 @@ Without a widget, use `DurableQueueLifecycle.attach(queue)` and `dispose()` it w
 
 Mobile operating systems suspend or kill apps in the background, often within seconds. A task started then can be cut off mid-attempt and, after the next launch, is counted as an interrupted attempt. Pausing stops new tasks from starting while the app is hidden; tasks that already started keep running. Set `pauseInBackground: false` if your tasks are short or your app keeps running in the background.
 
-The queue runs while your app runs. This package does not wake a closed app.
+The queue runs while your app runs. This package does not wake a closed app; [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager) runs the queue from background jobs.
 
 ## Show task status
 
@@ -78,6 +80,8 @@ Both rebuild when a task they show changes. They use the streams `queue.watchTas
 * [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite): storage that survives restarts, on mobile, desktop, and the web.
 * [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity): network tasks wait while offline and start when connectivity returns.
 * [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio): HTTP retry rules, `Retry-After`, and queued requests.
+* [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager): run the queue from Workmanager background jobs on Android and iOS.
+* [`durable_queue_transfer`](https://pub.dev/packages/durable_queue_transfer): uploads and downloads that keep going after the app is closed.
 
 ## Contributing
 

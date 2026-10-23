@@ -26,6 +26,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Deduplication and idempotency keys
 * Cooperative cancellation, pause, resume, and stop
 * `drain`: run what is ready within a time limit, for background jobs
+* Hand-off: a task can wait for work the operating system finishes, such as a background upload
 * Lifecycle events and queries by status or group
 * Startup recovery of tasks interrupted by a crash
 * An injectable clock, so retry logic is testable without waiting
@@ -35,7 +36,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.3
+  durable_queue: ^0.5.4
 ```
 
 ## Packages
@@ -49,6 +50,8 @@ dependencies:
 | [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
 | [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. |
 | [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity) | A network gate for Flutter on `connectivity_plus`, with an optional reachability check against your server. |
+| [`durable_queue_transfer`](https://pub.dev/packages/durable_queue_transfer) | Uploads and downloads that keep going after the app is minimised or closed, run by the operating system through `background_downloader`. |
+| [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager) | Background jobs on Android and iOS: runs the queue from Workmanager while the app is away, with a lease so the app and the job never run it at once. |
 
 Need an integration that is not listed? Ask in [Discussions](https://github.com/boffincoders/durable_queue/discussions).
 
@@ -102,7 +105,7 @@ Future<void> main() async {
 
 ## How the packages fit together
 
-The core engine decides *when* each task runs. Everything else plugs into one of three slots: a **gate** decides whether a task may start now, **storage** decides where tasks live, and a **handler** does the actual work. `durable_queue_flutter` connects the queue to your app's lifecycle and UI.
+The core engine decides *when* each task runs. Everything else plugs into one of three slots: a **gate** decides whether a task may start now, **storage** decides where tasks live, and a **handler** does the actual work. `durable_queue_flutter` connects the queue to your app's lifecycle and UI, and `durable_queue_workmanager` runs it in background jobs while the app is away.
 
 ```text
                     Your Flutter or Dart app
@@ -111,6 +114,9 @@ The core engine decides *when* each task runs. Everything else plugs into one of
   durable_queue_flutter ──────▶│  starts the queue with the app,
   (optional)                   │  pauses it in the background,
                                │  rebuilds widgets from tasks
+                               │
+  durable_queue_workmanager ──▶│  runs it in background jobs
+  (optional)                   │  while the app is away
                                ▼
  ┌─────────────────────────────────────────────────────────────┐
  │                 durable_queue · core engine                 │
@@ -125,11 +131,16 @@ The core engine decides *when* each task runs. Everything else plugs into one of
  connectivity          sqlite              HTTP requests, retry
  waits while offline   survives restarts   rules, Retry-After
 
+                                           durable_queue_transfer
+                                           uploads, downloads the
+                                           OS finishes in the
+                                           background
+
  built in:             built in:           built in:
  ManualQueueGate       MemoryQueueStorage  any async function
 ```
 
-Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, the connectivity gate when work needs the network, Dio for HTTP. Your own gates, storage adapters, and handlers fit the same slots.
+Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
 ## How it works
 
@@ -448,6 +459,35 @@ print('${result.completed} done, ${result.failed} failed, stopped: ${result.reas
 * At the limit no new task starts; tasks already running finish first, so leave headroom for your longest task.
 * The queue must be idle when `drain` is called, and is idle again when it returns.
 
+On Android and iOS, [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager) runs `drain` from Workmanager jobs. Its lease keeps the job and the app's own queue from running the same storage at once.
+
+## Work that finishes outside the queue
+
+Some work outlives the handler that starts it. An upload given to the operating system's background transfer service keeps going after the app is suspended or closed, and its result arrives later, maybe after a restart. A handler hands such a task off instead of waiting:
+
+```dart
+queue.register<UploadPhotoTask>(
+  type: 'upload_photo',
+  decoder: UploadPhotoTask.fromJson,
+  handler: (task, context) async {
+    final transferId = await startSystemUpload(task.path); // returns at once
+    context.handOff(transferId);
+  },
+);
+
+// Later, when the transfer reports back (in this run of the app or a later one):
+await queue.completeHandOff(taskId, reference: transferId);
+await queue.failHandOff(taskId, error, reference: transferId); // retry rules apply
+```
+
+* A handed-off task stays `running` with `handOffReference` set (`StoredTask.isHandedOff`). It does not hold a concurrency slot, `start` does not treat it as interrupted, and tasks that depend on it wait for its outcome.
+* `completeHandOff` completes it. `failHandOff` applies the type's `retryIf`, `retryDelay`, and `deferOn` rules and the retry policy, as if the handler had thrown; a retry runs the handler again, which starts the work again. A `TaskCancelledException` cancels it.
+* Both take the `reference` the handler gave and return false when it does not match the current attempt, or the task is no longer handed off, so a late or repeated report is harmless.
+* `cancel` stops waiting at once: the task becomes cancelled and a `TaskCancelled` event (`wasRunning: true`) tells whoever runs the outside work to stop it.
+* The reference is stored as soon as `handOff` is called, so a crash before the handler returns does not start the work twice.
+
+[`durable_queue_transfer`](https://pub.dev/packages/durable_queue_transfer) does this for uploads and downloads with `background_downloader`.
+
 ## Observation
 
 ```dart
@@ -492,7 +532,7 @@ QueueTaskBuilder(
 
 Without that package, create the queue the same way, call `await queue.start()` before `runApp`, and build UI from `queue.events`, `getTask`, and `getTasks`.
 
-The queue runs while your app's process runs. It does not wake a terminated app; it starts again on the next launch.
+The queue runs while your app's process runs. It does not wake a terminated app; it starts again on the next launch. To keep work going while the app is away, run it from background jobs with [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager).
 
 ## Storage
 

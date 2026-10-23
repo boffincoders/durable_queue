@@ -20,6 +20,7 @@ StoredTask storedTask({
   List<String> dependsOn = const [],
   DependencyFailurePolicy onDependencyFailure = DependencyFailurePolicy.cancel,
   String? group,
+  String? handOffReference,
 }) {
   final created = createdAt ?? DateTime.utc(2026, 1, 1);
   return StoredTask(
@@ -41,5 +42,6 @@ StoredTask storedTask({
     dependsOn: dependsOn,
     onDependencyFailure: onDependencyFailure,
     group: group,
+    handOffReference: handOffReference,
   );
 }

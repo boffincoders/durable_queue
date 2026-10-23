@@ -1,0 +1,33 @@
+name: durable_queue_workmanager
+description: Run durable_queue tasks in Workmanager background jobs on Android and iOS, with a lease that keeps the app and the background job from running the queue twice.
+version: 0.1.0
+repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_workmanager
+issue_tracker: https://github.com/boffincoders/durable_queue/issues
+topics:
+  - queue
+  - background
+  - workmanager
+  - offline
+  - retry
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.38.0"
+
+platforms:
+  android:
+  ios:
+
+# Not part of the root pub workspace: this package needs the Flutter SDK,
+# and the other packages must stay resolvable with plain Dart.
+
+dependencies:
+  durable_queue: ^0.5.3
+  flutter:
+    sdk: flutter
+  workmanager: ^0.10.10
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0

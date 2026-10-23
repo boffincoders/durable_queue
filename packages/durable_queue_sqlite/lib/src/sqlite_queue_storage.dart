@@ -310,10 +310,26 @@ final class SqliteQueueStorage implements QueueStorage {
     await _flush?.call();
   }
 
-  /// Runs [body] atomically. Uses a savepoint, so it also works when the
-  /// app already has a transaction open on a shared database.
+  /// Runs [body] atomically.
+  ///
+  /// On its own, it takes the write lock up front (`BEGIN IMMEDIATE`), so
+  /// that another connection to the same file, for example from a
+  /// background isolate, makes it wait instead of failing when it reads and
+  /// then writes. Inside a transaction the app already opened, it uses a
+  /// savepoint.
   void _transaction(void Function() body) {
     _ensureOpen();
+    if (_db.autocommit) {
+      _db.execute('BEGIN IMMEDIATE');
+      try {
+        body();
+        _db.execute('COMMIT');
+      } catch (_) {
+        _db.execute('ROLLBACK');
+        rethrow;
+      }
+      return;
+    }
     _db.execute('SAVEPOINT durable_queue');
     try {
       body();

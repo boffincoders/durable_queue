@@ -10,6 +10,8 @@ Persist every `StoredTask` field. `StoredTask.toJson` / `StoredTask.fromJson` is
 
 Since 0.3.0 that includes `priority` (int), `dependsOn` (list of task ids), `onDependencyFailure` (policy name), and `group` (nullable string). `fromJson` gives records written by earlier versions the defaults: priority `0`, no dependencies, `cancel`, and no group. Adapters that store columns rather than JSON should use the same defaults.
 
+Since 0.5.4 it also includes `handOffReference` (nullable string), set while a task is handed off to outside work. It must survive restarts: a running task without it is treated as interrupted on the next `start`. Records written earlier have none. Adapters that store the `toJson` record, like `durable_queue_sqlite`, need no change.
+
 The payload is whatever the application put in `DurableTask.toJson`. Treat it as sensitive. This package does not encrypt it.
 
 ## Methods

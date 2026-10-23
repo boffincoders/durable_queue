@@ -6,9 +6,10 @@ import 'opened_database.dart';
 OpenedDatabase openFile(String path) {
   final db = sqlite3.open(path);
   try {
+    // First, so that the statements below also wait for other connections.
+    db.execute('PRAGMA busy_timeout = 5000');
     db.execute('PRAGMA journal_mode = WAL');
     db.execute('PRAGMA synchronous = FULL');
-    db.execute('PRAGMA busy_timeout = 5000');
     return OpenedDatabase(db);
   } catch (_) {
     db.close();

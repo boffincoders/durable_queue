@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:durable_queue/durable_queue.dart';
 import 'package:durable_queue_sqlite/durable_queue_sqlite.dart';
@@ -181,6 +182,32 @@ void main() {
       await second.close();
     });
   });
+
+  test(
+    'isolates with their own connection can write at the same time',
+    () async {
+      final path = nextPath();
+      SqliteQueueStorage.open(path).close();
+      Future<int> writer(String name) => Isolate.run(() async {
+        final storage = SqliteQueueStorage.open(path);
+        var written = 0;
+        for (var i = 0; i < 300; i++) {
+          final id = '$name-$i';
+          await storage.save(storedTask(id: id, sequence: i));
+          final task = (await storage.get(id))!;
+          await storage.update(task.copyWith(attempts: 1));
+          written++;
+        }
+        await storage.close();
+        return written;
+      });
+      final counts = await Future.wait([writer('a'), writer('b'), writer('c')]);
+      expect(counts, [300, 300, 300]);
+      final storage = SqliteQueueStorage.open(path);
+      expect((await storage.getAll()).length, 900);
+      await storage.close();
+    },
+  );
 
   test('a write that fails part-way leaves no partial record', () async {
     final db = sqlite3.openInMemory();

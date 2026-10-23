@@ -13,7 +13,9 @@ workspace:
   - packages/durable_queue_sqlite
   - packages/durable_queue_test_support
 
-# Not in the workspace: packages/durable_queue_connectivity and
-# packages/durable_queue_flutter. They need the Flutter SDK, and a Flutter
-# member would make `dart pub get` fail for every package here. Run
-# `flutter pub get` inside their folders instead.
+# Not in the workspace: packages/durable_queue_connectivity,
+# packages/durable_queue_flutter, packages/durable_queue_transfer, and
+# packages/durable_queue_workmanager.
+# They need the Flutter SDK, and a Flutter member would make `dart pub get`
+# fail for every package here. Run `flutter pub get` inside their folders
+# instead.

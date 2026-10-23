@@ -116,3 +116,67 @@ jobs:
       - run: flutter analyze --fatal-infos
       - run: flutter test
       - run: flutter pub publish --dry-run
+
+  durable_queue_flutter:
+    # A Flutter package outside the Dart workspace, resolved on its own.
+    name: durable_queue_flutter (Flutter ${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        channel: [stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+      - run: flutter pub publish --dry-run
+
+  durable_queue_workmanager:
+    # A Flutter package outside the Dart workspace, resolved on its own.
+    name: durable_queue_workmanager (Flutter ${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        channel: [stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_workmanager
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+      - run: flutter pub publish --dry-run
+
+  durable_queue_transfer:
+    # A Flutter package outside the Dart workspace, resolved on its own.
+    # background_downloader needs Flutter 3.47 or later.
+    name: durable_queue_transfer (Flutter ${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        channel: [stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_transfer
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze --fatal-infos
+      - run: flutter test
+      - run: flutter pub publish --dry-run

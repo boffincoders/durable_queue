@@ -15,7 +15,7 @@ Everything else (tasks, retries, priorities, dependencies, groups) works exactly
 ```yaml
 dependencies:
   durable_queue: ^0.5.0
-  durable_queue_sqlite: ^0.2.1
+  durable_queue_sqlite: ^0.2.2
 ```
 
 SQLite itself comes from [`package:sqlite3`](https://pub.dev/packages/sqlite3) 3.x, which bundles a compiled SQLite with your app through Dart build hooks. You do not need `sqlite3_flutter_libs`. To use the operating system's SQLite or an encrypted build instead, see the [`sqlite3` hook options](https://github.com/simolus3/sqlite3.dart/blob/main/sqlite3/doc/hook.md).
@@ -44,7 +44,7 @@ Future<DurableQueue> openQueue() async {
 }
 ```
 
-Create the queue once, at startup. Only one `DurableQueue` should use a database (and table prefix) at a time.
+Create the queue once, at startup. Only one `DurableQueue` should run a database (and table prefix) at a time: a starting queue treats tasks marked running as interrupted. Other connections may read and enqueue meanwhile. To run the same database from a background job as well, use [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager), whose lease makes the app and the job take turns.
 
 For an app that also runs on the web:
 

@@ -38,6 +38,7 @@ final class StoredTask {
     Iterable<String> dependsOn = const [],
     this.onDependencyFailure = DependencyFailurePolicy.cancel,
     this.group,
+    this.handOffReference,
   }) : payload = _freezeMap(payload),
        dependsOn = List<String>.unmodifiable(LinkedHashSet.of(dependsOn)) {
     if (id.isEmpty) {
@@ -70,6 +71,13 @@ final class StoredTask {
     }
     if (group != null && group!.isEmpty) {
       throw ArgumentError.value(group, 'group', 'Must not be empty');
+    }
+    if (handOffReference != null && handOffReference!.trim().isEmpty) {
+      throw ArgumentError.value(
+        handOffReference,
+        'handOffReference',
+        'Must not be blank',
+      );
     }
   }
 
@@ -135,11 +143,25 @@ final class StoredTask {
   /// Optional application label used to query or cancel related tasks.
   final String? group;
 
+  /// The reference given to `TaskContext.handOff` by the latest attempt, or
+  /// null if that attempt did not hand the task off.
+  ///
+  /// It names the outside work, such as a transfer id, and stays on the
+  /// record after the task finishes. It is cleared when a new attempt
+  /// starts. See [isHandedOff].
+  final String? handOffReference;
+
+  /// Whether the task is running outside the queue: its handler handed it off
+  /// and the queue is waiting for `DurableQueue.completeHandOff` or
+  /// `DurableQueue.failHandOff`.
+  bool get isHandedOff =>
+      status == TaskStatus.running && handOffReference != null;
+
   /// Returns a copy with the given fields replaced.
   ///
   /// Nullable fields use a sentinel so they can be cleared. Pass `null` to
   /// clear [nextAttemptAt], [deduplicationKey], [idempotencyKey],
-  /// [lastFailure], or [group].
+  /// [lastFailure], [group], or [handOffReference].
   StoredTask copyWith({
     String? id,
     String? type,
@@ -159,6 +181,7 @@ final class StoredTask {
     Iterable<String>? dependsOn,
     DependencyFailurePolicy? onDependencyFailure,
     Object? group = _unset,
+    Object? handOffReference = _unset,
   }) {
     return StoredTask(
       id: id ?? this.id,
@@ -187,6 +210,9 @@ final class StoredTask {
       dependsOn: dependsOn ?? this.dependsOn,
       onDependencyFailure: onDependencyFailure ?? this.onDependencyFailure,
       group: identical(group, _unset) ? this.group : group as String?,
+      handOffReference: identical(handOffReference, _unset)
+          ? this.handOffReference
+          : handOffReference as String?,
     );
   }
 
@@ -210,13 +236,15 @@ final class StoredTask {
     'dependsOn': dependsOn,
     'onDependencyFailure': onDependencyFailure.name,
     'group': group,
+    'handOffReference': handOffReference,
   };
 
   /// Restores a record produced by [toJson].
   ///
   /// Records written before 0.3.0 have no `priority`, `dependsOn`,
   /// `onDependencyFailure`, or `group` keys. They load with priority zero, no
-  /// dependencies, [DependencyFailurePolicy.cancel], and no group.
+  /// dependencies, [DependencyFailurePolicy.cancel], and no group. Records
+  /// written before 0.5.4 have no `handOffReference` and load without one.
   factory StoredTask.fromJson(Map<String, dynamic> json) {
     final statusName = _requireString(json, 'status');
     final status = TaskStatus.values.where((value) => value.name == statusName);
@@ -249,6 +277,7 @@ final class StoredTask {
       dependsOn: _optionalStringList(json, 'dependsOn'),
       onDependencyFailure: _dependencyPolicy(json),
       group: _optionalString(json, 'group'),
+      handOffReference: _optionalString(json, 'handOffReference'),
     );
   }
 

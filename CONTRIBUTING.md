@@ -26,8 +26,10 @@ The repository is a Dart pub workspace. Each published package lives in `package
 | `packages/durable_queue_test_support` | Shared test helpers, including the storage contract suite. Not published. |
 | `packages/durable_queue_connectivity` | Network gate for Flutter. Needs the Flutter SDK, so it is not part of the workspace: run `flutter pub get` inside its folder. |
 | `packages/durable_queue_flutter` | Flutter integration (lifecycle, widgets). Also outside the workspace: run `flutter pub get` inside its folder. |
+| `packages/durable_queue_transfer` | Background uploads and downloads on `background_downloader`. Also outside the workspace: run `flutter pub get` inside its folder. Needs Flutter 3.47 or later. |
+| `packages/durable_queue_workmanager` | Workmanager background jobs and the queue lease. Also outside the workspace: run `flutter pub get` inside its folder. Tests under `test/widgets/` need the Flutter test binding. |
 
-Run the checks below from inside the package you changed. For the Flutter packages (`durable_queue_connectivity`, `durable_queue_flutter`), use `flutter analyze` and `flutter test` instead of the `dart` commands.
+Run the checks below from inside the package you changed. For the Flutter packages (`durable_queue_connectivity`, `durable_queue_flutter`, `durable_queue_transfer`, `durable_queue_workmanager`), use `flutter analyze` and `flutter test` instead of the `dart` commands.
 
 ## Checks
 
