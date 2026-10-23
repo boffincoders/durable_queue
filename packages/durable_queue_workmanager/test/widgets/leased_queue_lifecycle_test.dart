@@ -47,17 +47,20 @@ void main() {
   late DurableQueue queue;
   late LeasedQueueRunner runner;
 
-  setUp(() {
+  // Called inside each test body: futures created in setUp belong to the
+  // real zone and do not complete inside testWidgets' fake async zone.
+  void create() {
     final clock = FakeQueueClock(DateTime.utc(2026, 10, 22));
     slot = LeaseSlot();
     lease = FakeLease(slot);
     queue = newQueue(clock: clock);
     runner = LeasedQueueRunner(queue, lease, clock: clock);
-  });
+  }
 
   testWidgets('runs in the foreground and stops in the background', (
     tester,
   ) async {
+    create();
     await moveTo(tester, AppLifecycleState.resumed);
     final lifecycle = LeasedQueueLifecycle.attach(runner);
     await settle(tester);
@@ -90,6 +93,7 @@ void main() {
   });
 
   testWidgets('does not start while hidden', (tester) async {
+    create();
     await moveTo(tester, AppLifecycleState.hidden);
     final lifecycle = LeasedQueueLifecycle.attach(runner);
     await settle(tester);
@@ -101,6 +105,7 @@ void main() {
   });
 
   testWidgets('errors go to onError', (tester) async {
+    create();
     await moveTo(tester, AppLifecycleState.resumed);
     lease.acquireError = StateError('disk');
     final errors = <Object>[];
