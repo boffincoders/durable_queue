@@ -57,6 +57,10 @@ The core engine decides *when* each task runs. Everything else plugs into one of
 
 Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
+## See it work
+
+[`examples/durable_queue_demo`](examples/durable_queue_demo) is a photo outbox app: add photos, close the app, and every photo is still uploaded and announced to the server exactly once. In CI the same app is killed in the middle of its uploads on an Android emulator and an iOS simulator, and the test checks that result ([device tests](.github/workflows/device-tests.yml)).
+
 ## Get started
 
 ```yaml
@@ -78,6 +82,8 @@ packages/
   durable_queue_dio/            Dio integration (published to pub.dev)
   durable_queue_sqlite/         SQLite storage (published to pub.dev)
   durable_queue_test_support/   shared test helpers (not published)
+examples/
+  durable_queue_demo/           demo app and kill tests (not published)
 pubspec.yaml                    Dart pub workspace root (not published)
 CONTRIBUTING.md                 how to contribute
 ```

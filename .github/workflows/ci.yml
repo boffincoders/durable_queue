@@ -180,3 +180,24 @@ jobs:
       - run: flutter analyze --fatal-infos
       - run: flutter test
       - run: flutter pub publish --dry-run
+
+  durable_queue_demo:
+    # The demo app: analysis and the demo server tests. The kill tests on an
+    # emulator and a simulator are in device-tests.yml.
+    name: durable_queue_demo (Flutter ${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        channel: [stable]
+    defaults:
+      run:
+        working-directory: examples/durable_queue_demo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze --fatal-infos
+      - run: flutter test

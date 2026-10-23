@@ -15,7 +15,8 @@ workspace:
 
 # Not in the workspace: packages/durable_queue_connectivity,
 # packages/durable_queue_flutter, packages/durable_queue_transfer, and
-# packages/durable_queue_workmanager.
+# packages/durable_queue_workmanager, nor the demo app in
+# examples/durable_queue_demo.
 # They need the Flutter SDK, and a Flutter member would make `dart pub get`
 # fail for every package here. Run `flutter pub get` inside their folders
 # instead.

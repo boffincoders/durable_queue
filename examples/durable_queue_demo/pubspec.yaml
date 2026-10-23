@@ -1,0 +1,42 @@
+name: durable_queue_demo
+description: Photo uploads that finish even if the app is closed, built with the durable_queue packages. Also used by the kill tests in CI.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
+
+dependencies:
+  background_downloader: ^9.6.4
+  connectivity_plus: ^7.3.2
+  dio: ^5.11.1
+  durable_queue: ^0.5.4
+  durable_queue_connectivity: ^0.1.0
+  durable_queue_dio: ^0.2.1
+  durable_queue_flutter: ^0.1.1
+  durable_queue_sqlite: ^0.2.2
+  durable_queue_transfer: ^0.1.0
+  flutter:
+    sdk: flutter
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+# The demo always runs the code in this repository.
+dependency_overrides:
+  durable_queue:
+    path: ../../packages/durable_queue
+  durable_queue_connectivity:
+    path: ../../packages/durable_queue_connectivity
+  durable_queue_dio:
+    path: ../../packages/durable_queue_dio
+  durable_queue_flutter:
+    path: ../../packages/durable_queue_flutter
+  durable_queue_sqlite:
+    path: ../../packages/durable_queue_sqlite
+  durable_queue_transfer:
+    path: ../../packages/durable_queue_transfer
