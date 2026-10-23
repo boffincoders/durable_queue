@@ -587,6 +587,8 @@ Persistence is not background execution. A terminated app stays terminated until
 
 Do not put secrets in task payloads or exception text. The queue stores them as plain data. `MemoryQueueStorage` does not encrypt anything.
 
+The full list, including what is not promised and how it is tested on devices: [Guarantees](https://github.com/boffincoders/durable_queue/blob/main/docs/guarantees.md).
+
 ## Examples
 
 ```sh
@@ -595,6 +597,8 @@ dart run example/image_upload.dart   # uploads that survive a restart
 dart run example/orchestration.dart  # chains, dependencies, priorities
 dart run example/rate_limits_and_gates.dart  # rate limits, offline gate
 ```
+
+More recipes, from offline forms to background jobs: [Cookbook](https://github.com/boffincoders/durable_queue/blob/main/docs/cookbook.md). A complete Flutter app, killed mid-upload in CI: [durable_queue_demo](https://github.com/boffincoders/durable_queue/tree/main/examples/durable_queue_demo).
 
 ## Contributing and feedback
 

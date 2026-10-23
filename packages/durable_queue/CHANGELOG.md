@@ -1,3 +1,7 @@
+## Unreleased
+
+* README: links to the guarantees page, the cookbook, and the demo app.
+
 ## 0.5.4
 
 New features, no breaking changes. Storage adapters and packages built for

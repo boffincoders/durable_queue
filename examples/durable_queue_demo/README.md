@@ -49,9 +49,9 @@ curl -X POST localhost:8080/config -d '{"failEvery": 3}'
 
 `tool/kill_test.dart` runs on the computer next to an emulator or simulator with the demo installed:
 
-1. It starts the demo server and holds every upload for 15 seconds.
+1. It starts the demo server and holds every upload for 60 seconds.
 2. It launches the app, which queues 6 photos (12 tasks).
-3. While uploads are in flight, it sends the app to the background and kills its process: on Android with `kill -9`, as the system does when it needs memory; on the iOS simulator with `simctl terminate`.
+3. While uploads are in flight (the test fails if none is), it sends the app to the background and kills its process: on Android with `kill -9`, as the system does when it needs memory; on the iOS simulator with `simctl terminate`.
 4. On Android it relaunches the app with Wi-Fi and mobile data off and checks that nothing is announced while offline, then turns the network back on.
 5. It relaunches the app and waits until all 12 tasks are completed.
 6. It checks that every photo was uploaded at least once and announced exactly once.

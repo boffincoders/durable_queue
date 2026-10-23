@@ -8,7 +8,7 @@
 //   dart run tool/kill_test.dart --platform ios --app-id <bundle id>
 //
 // Steps:
-//  1. Start the demo server; hold every upload for a few seconds.
+//  1. Start the demo server; hold every upload for 60 seconds.
 //  2. Launch the app with the scenario "enqueue N photos".
 //  3. Once uploads are running and handed off, send the app to the
 //     background and kill its process (Android: like the system killing it
@@ -65,8 +65,9 @@ Future<void> run(DemoServer server, int count) async {
   await stopApp();
 
   // 1–2. Enqueue with slow uploads.
-  // Long enough that the kill below lands while uploads are in flight.
-  server.uploadDelay = const Duration(seconds: 15);
+  // Long enough that the kill below lands while uploads are in flight; the
+  // kill checks that it did.
+  server.uploadDelay = const Duration(seconds: 60);
   server.scenario = {'action': 'enqueue', 'count': count, 'sizeKb': 256};
   await launchApp();
   await waitFor(
@@ -80,7 +81,7 @@ Future<void> run(DemoServer server, int count) async {
 
   // 3. Kill it in the middle.
   server.scenario = {'action': 'observe'};
-  await killApp();
+  await killApp(server);
   log(
     'killed; uploads continue without the app: ${jsonEncode(server.stats())}',
   );
@@ -94,6 +95,7 @@ Future<void> run(DemoServer server, int count) async {
     await launchApp();
     await Future<void>.delayed(const Duration(seconds: 15));
     final doneOffline = sum(server.done);
+    log('after 15 s offline: ${jsonEncode(server.stats())}');
     if (doneOffline != doneBefore) {
       throw StateError('Announcements went out while offline');
     }
@@ -191,13 +193,24 @@ Future<void> stopApp() async {
   }
 }
 
-Future<void> killApp() async {
+/// Fails the test if no upload is in flight right before the kill, so a slow
+/// step cannot turn this into a test of an idle app.
+void expectInFlight(DemoServer server) {
+  final inFlight = server.uploadsInFlight;
+  if (inFlight == 0) {
+    throw StateError('No upload in flight at the kill; the kill came too late');
+  }
+  log('killing with $inFlight uploads in flight');
+}
+
+Future<void> killApp(DemoServer server) async {
   if (platform == 'android') {
     // Background first, then kill the process the way the system does when
     // it needs memory. WorkManager keeps the transfers scheduled.
     await sh('adb', ['shell', 'input', 'keyevent', 'KEYCODE_HOME']);
     await Future<void>.delayed(const Duration(seconds: 2));
     final pid = await sh('adb', ['shell', 'pidof', appId]);
+    expectInFlight(server);
     if (pid.isNotEmpty) {
       await sh('adb', ['shell', 'run-as', appId, 'kill', '-9', pid]);
     }
@@ -211,6 +224,7 @@ Future<void> killApp() async {
     // Send it to the background, then terminate it.
     await sh('xcrun', ['simctl', 'launch', 'booted', 'com.apple.Preferences']);
     await Future<void>.delayed(const Duration(seconds: 2));
+    expectInFlight(server);
     await sh('xcrun', ['simctl', 'terminate', 'booted', appId]);
     log('terminated');
   }

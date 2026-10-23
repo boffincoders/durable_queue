@@ -27,6 +27,7 @@ The repository is a Dart pub workspace. Each published package lives in `package
 | `packages/durable_queue_connectivity` | Network gate for Flutter. Needs the Flutter SDK, so it is not part of the workspace: run `flutter pub get` inside its folder. |
 | `packages/durable_queue_flutter` | Flutter integration (lifecycle, widgets). Also outside the workspace: run `flutter pub get` inside its folder. |
 | `packages/durable_queue_transfer` | Background uploads and downloads on `background_downloader`. Also outside the workspace: run `flutter pub get` inside its folder. Needs Flutter 3.47 or later. |
+| `examples/cookbook` | The recipes of `docs/cookbook.md`. Change a recipe here and in the doc together. |
 | `examples/durable_queue_demo` | Demo app and the device kill tests. Uses the packages in this repository through path overrides. See its README. |
 | `packages/durable_queue_workmanager` | Workmanager background jobs and the queue lease. Also outside the workspace: run `flutter pub get` inside its folder. Tests under `test/widgets/` need the Flutter test binding. |
 

@@ -61,6 +61,11 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 [`examples/durable_queue_demo`](examples/durable_queue_demo) is a photo outbox app: add photos, close the app, and every photo is still uploaded and announced to the server exactly once. In CI the same app is killed in the middle of its uploads on an Android emulator and an iOS simulator, and the test checks that result ([device tests](.github/workflows/device-tests.yml)).
 
+## Guarantees and recipes
+
+* [What durable_queue guarantees](docs/guarantees.md): what is promised, what is not, and how it is tested, including the device kill tests.
+* [Cookbook](docs/cookbook.md): offline forms, ordered chat messages, upload then notify, rate-limited sync, background jobs, progress in the UI, failed work, and testing. Every recipe is a file that CI compiles.
+
 ## Get started
 
 ```yaml
@@ -82,7 +87,9 @@ packages/
   durable_queue_dio/            Dio integration (published to pub.dev)
   durable_queue_sqlite/         SQLite storage (published to pub.dev)
   durable_queue_test_support/   shared test helpers (not published)
+docs/                           guarantees and cookbook
 examples/
+  cookbook/                     the cookbook's recipes, checked by CI (not published)
   durable_queue_demo/           demo app and kill tests (not published)
 pubspec.yaml                    Dart pub workspace root (not published)
 CONTRIBUTING.md                 how to contribute

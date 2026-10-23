@@ -11,6 +11,7 @@ runtimes = sorted((r for r in devices if "iOS" in r), reverse=True)
 for runtime in runtimes:
     for device in devices[runtime]:
         if device["name"].startswith("iPhone"):
+            print(device["name"], runtime.split(".")[-1], file=sys.stderr)
             print(device["udid"])
             sys.exit(0)
 sys.exit("No iPhone simulator found")
