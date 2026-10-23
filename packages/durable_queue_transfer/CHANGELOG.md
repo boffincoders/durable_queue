@@ -1,6 +1,6 @@
 ## Unreleased
 
-* README: links to demo videos on a real iPhone and Android phone.
+* README: a demo GIF and links to demo videos on a real iPhone and Android phone.
 
 ## 0.1.0
 
