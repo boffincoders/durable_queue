@@ -2,6 +2,8 @@
 
 Uploads and downloads for [`durable_queue`](https://pub.dev/packages/durable_queue) that keep going after the user minimises or closes the app.
 
+**Watch the demo on real phones: [iPhone](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo.mp4) (78 s) · [Android](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo_android.mp4) (103 s).** Photos are queued, the app goes to the home screen, and every upload still reaches the server, including ones whose first try the server failed on purpose.
+
 The operating system runs the transfer, through [`background_downloader`](https://pub.dev/packages/background_downloader): a background `URLSession` on iOS, WorkManager or a user-initiated data transfer job on Android. The queue keeps the bookkeeping: retries with backoff, priorities, rate limits, dependencies ("upload the photo, then tell the server"), deduplication, and a record of every task that survives restarts.
 
 ## How it works

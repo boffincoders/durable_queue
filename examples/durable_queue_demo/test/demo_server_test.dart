@@ -98,5 +98,11 @@ void main() {
     expect((await call('POST', '/upload', bytes: [1])).$1, 400);
     expect((await call('GET', '/nope')).$1, 404);
     expect((await call('GET', '/health')).$2, {'ok': true});
+    final page = await client.getUrl(
+      Uri.parse('http://127.0.0.1:${server.port}/'),
+    );
+    final response = await page.close();
+    expect(response.headers.contentType?.mimeType, 'text/html');
+    expect(await utf8.decoder.bind(response).join(), contains('/stats'));
   });
 }

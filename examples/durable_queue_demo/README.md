@@ -2,6 +2,8 @@
 
 A small Flutter app that queues "photos" and uploads them, built with the durable_queue packages. Add photos, close the app, open it again: every photo is uploaded, and the server is told about each one exactly once.
 
+**Watch the demo on real phones: [iPhone](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo.mp4) (78 s) · [Android](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo_android.mp4) (103 s).** Photos are queued, the app goes to the home screen, and every upload still reaches the server, including ones whose first try the server failed on purpose.
+
 The same app runs in CI on an Android emulator and an iOS simulator, where a test kills it in the middle of the uploads and checks the result (see [Kill test](#kill-test)).
 
 ## What it shows
@@ -38,7 +40,9 @@ You need Flutter 3.47 or later.
    * iOS simulator: `flutter run --dart-define=DEMO_SERVER=http://localhost:8080`
    * A phone on your Wi-Fi: `flutter run --dart-define=DEMO_SERVER=http://<your computer's IP>:8080`
 
-Then tap **Add 3 photos** or **Add a 20 MB photo**, and close the app. To watch the server's view, open `http://localhost:8080/stats` on your computer. To make it harder, slow down or fail uploads:
+Then tap **Add 3 photos** or **Add a 20 MB photo**, and close the app. To watch what the server receives, open `http://localhost:8080/` on your computer: a live table of uploads and follow-ups (raw numbers at `/stats`).
+
+On a phone, use your computer's IP address, and allow the app to use the local network when iOS asks. The line under the title says whether the app can reach the server; if it cannot, check that your computer's firewall allows incoming connections to `dart`. To make it harder, slow down or fail uploads:
 
 ```
 curl -X POST localhost:8080/config -d '{"uploadDelayMs": 10000}'

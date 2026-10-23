@@ -32,6 +32,9 @@ plist=ios/Runner/Info.plist
 if ! grep -q NSAllowsLocalNetworking "$plist"; then
   perl -0pi -e 's|<dict>|<dict>\n\t<key>NSAppTransportSecurity</key>\n\t<dict>\n\t\t<key>NSAllowsLocalNetworking</key>\n\t\t<true/>\n\t</dict>|' "$plist"
 fi
+if ! grep -q NSLocalNetworkUsageDescription "$plist"; then
+  perl -0pi -e 's|<dict>|<dict>\n\t<key>NSLocalNetworkUsageDescription</key>\n\t<string>The demo uploads photos to the demo server on your computer.</string>|' "$plist"
+fi
 perl -pi -e 's/IPHONEOS_DEPLOYMENT_TARGET = 1[0-3]\.0;/IPHONEOS_DEPLOYMENT_TARGET = 14.0;/g' \
   ios/Runner.xcodeproj/project.pbxproj
 if [ -f ios/Podfile ]; then

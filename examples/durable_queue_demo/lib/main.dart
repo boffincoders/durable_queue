@@ -7,6 +7,9 @@
 // (durable_queue_sqlite) and shown with durable_queue_flutter.
 //
 // Start the server first: dart run tool/demo_server.dart
+import 'dart:async';
+import 'dart:io';
+
 import 'package:durable_queue/durable_queue.dart';
 import 'package:durable_queue_flutter/durable_queue_flutter.dart';
 import 'package:flutter/widgets.dart';
@@ -75,10 +78,7 @@ class _Home extends StatelessWidget {
               style: TextStyle(color: _muted),
             ),
             const SizedBox(height: 4),
-            const Text(
-              'Server: $demoServer',
-              style: TextStyle(color: _muted, fontSize: 12),
-            ),
+            const _ServerStatus(),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
@@ -211,5 +211,66 @@ class _TaskRow extends StatelessWidget {
       TaskStatus.failed => 'failed',
       TaskStatus.cancelled => 'cancelled',
     };
+  }
+}
+
+/// Checks every few seconds that the demo server answers, so a wrong
+/// address, a firewall, or a missing permission shows up on screen. On iOS
+/// the first check also brings up the local network permission prompt.
+class _ServerStatus extends StatefulWidget {
+  const _ServerStatus();
+
+  @override
+  State<_ServerStatus> createState() => _ServerStatusState();
+}
+
+class _ServerStatusState extends State<_ServerStatus> {
+  final _client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+  Timer? _timer;
+  String _status = 'checking...';
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _check());
+  }
+
+  Future<void> _check() async {
+    String status;
+    try {
+      final request = await _client.getUrl(Uri.parse('$demoServer/health'));
+      final response = await request.close().timeout(
+        const Duration(seconds: 4),
+      );
+      await response.drain<void>();
+      status = response.statusCode == 200
+          ? 'reachable'
+          : 'answered ${response.statusCode}';
+    } on SocketException catch (error) {
+      // "Failed host lookup", "Connection refused", "Connection timed out"...
+      final reason = error.osError?.message ?? error.message;
+      status = 'NOT reachable: ${reason.isEmpty ? 'socket error' : reason}';
+    } on TimeoutException {
+      status = 'NOT reachable: no answer within 4 s';
+    } on Object catch (error) {
+      status = 'NOT reachable (${error.runtimeType})';
+    }
+    if (mounted) setState(() => _status = status);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _client.close(force: true);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      'Server: $demoServer, $_status',
+      style: const TextStyle(color: _muted, fontSize: 12),
+    );
   }
 }

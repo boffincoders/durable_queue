@@ -101,6 +101,10 @@ final class DemoServer {
     final path = request.uri.path;
     final method = request.method;
     switch ((method, path)) {
+      case ('GET', '/'):
+        request.response.headers.contentType = ContentType.html;
+        request.response.write(_page);
+        return request.response.close();
       case ('GET', '/health'):
         return _json(request, {'ok': true});
       case ('HEAD', '/health'):
@@ -196,12 +200,51 @@ final class DemoServer {
   }
 }
 
+/// A page that shows what the server received, updated every second. Open
+/// it next to the app when recording a demo.
+const _page = '''<!doctype html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demo server</title>
+<style>
+body{font:16px system-ui,sans-serif;margin:24px;color:#1b1b1f;background:#f7f7fa}
+h1{font-size:22px;margin:0 0 4px}p{color:#5e5e66;margin:0 0 16px}
+table{border-collapse:collapse;width:100%;max-width:640px}
+td,th{text-align:left;padding:8px;border-bottom:1px solid #ddd}
+.ok{color:#1a7f37;font-weight:600}.wait{color:#9a6700}
+</style></head><body>
+<h1>What the server received</h1>
+<p id="summary">Waiting for the app...</p>
+<table><thead><tr><th>Photo</th><th>Upload</th><th>Server told</th></tr></thead>
+<tbody id="rows"></tbody></table>
+<script>
+async function refresh(){
+  try{
+    const s=await (await fetch('/stats')).json();
+    const names=[...new Set([...Object.keys(s.uploadAttempts),...Object.keys(s.done)])].sort();
+    const rows=names.map(n=>{
+      const up=s.uploads[n]||0, tries=s.uploadAttempts[n]||0, done=s.done[n]||0;
+      const upText=up?'<span class="ok">received</span>'+(tries>1?' ('+tries+' tries)':''):'<span class="wait">in progress</span>';
+      const doneText=done?'<span class="ok">yes'+(done>1?' ('+done+' times)':'')+'</span>':'';
+      return '<tr><td>'+n+'</td><td>'+upText+'</td><td>'+doneText+'</td></tr>';
+    });
+    document.getElementById('rows').innerHTML=rows.join('');
+    const told=Object.keys(s.done).length;
+    document.getElementById('summary').textContent=names.length
+      ? told+' of '+names.length+' photos complete, '+s.uploadsInFlight+' uploads in flight'
+      : 'Waiting for the app...';
+  }catch(e){}
+}
+refresh();setInterval(refresh,1000);
+</script></body></html>''';
+
 Future<void> main(List<String> args) async {
   var port = 8080;
   final index = args.indexOf('--port');
   if (index >= 0 && index + 1 < args.length) port = int.parse(args[index + 1]);
   final server = await DemoServer.start(port: port);
   stdout.writeln('durable_queue demo server on port ${server.port}');
+  stdout.writeln('Live view:        http://localhost:${server.port}/');
   stdout.writeln('Android emulator: http://10.0.2.2:${server.port}');
   stdout.writeln('iOS simulator:    http://localhost:${server.port}');
   ProcessSignal.sigint.watch().listen((_) async {
