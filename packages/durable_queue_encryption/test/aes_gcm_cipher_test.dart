@@ -56,14 +56,17 @@ void main() {
     final sealed = await cipher.encrypt([1, 2, 3], associatedData: _aad);
     expect(
       cipher.decrypt(sealed, keyId: 'k1', associatedData: utf8.encode('x')),
-      throws,
+      throwsA(anything),
     );
     expect(
       cipher.decrypt(sealed, keyId: 'k9', associatedData: _aad),
       throwsArgumentError,
     );
     final changed = [...sealed]..[0] ^= 1;
-    expect(cipher.decrypt(changed, keyId: 'k1', associatedData: _aad), throws);
+    expect(
+      cipher.decrypt(changed, keyId: 'k1', associatedData: _aad),
+      throwsA(anything),
+    );
   });
 
   test('lookup tags are stable, keyed, and list the current key first', () {

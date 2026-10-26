@@ -4,13 +4,23 @@ name: Device tests
 # an iOS simulator, and checks that every photo is uploaded and announced
 # exactly once afterwards. See examples/durable_queue_demo/tool/kill_test.dart.
 
+# They take about 20 minutes and use macOS runner time, so they run only
+# when code the demo app runs has changed (not docs or other packages'
+# tests), and on demand from the Actions tab.
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
-      - 'packages/**'
-      - 'examples/**'
+      - 'packages/durable_queue/lib/**'
+      - 'packages/durable_queue_sqlite/lib/**'
+      - 'packages/durable_queue_dio/lib/**'
+      - 'packages/durable_queue_connectivity/lib/**'
+      - 'packages/durable_queue_flutter/lib/**'
+      - 'packages/durable_queue_transfer/lib/**'
+      - 'examples/durable_queue_demo/lib/**'
+      - 'examples/durable_queue_demo/tool/**'
+      - 'examples/durable_queue_demo/pubspec.yaml'
       - '.github/workflows/device-tests.yml'
 
 jobs:
