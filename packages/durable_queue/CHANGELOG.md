@@ -1,4 +1,6 @@
-## Unreleased
+## 0.5.5
+
+Documentation only; no code changes.
 
 * README: links to the guarantees page, the cookbook, and the demo app.
 * README: a demo GIF and links to demo videos on real phones.

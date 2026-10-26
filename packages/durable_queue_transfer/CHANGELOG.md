@@ -1,4 +1,6 @@
-## Unreleased
+## 0.1.1
+
+Documentation only; no code changes.
 
 * README: a demo GIF and links to demo videos on a real iPhone and Android phone.
 
