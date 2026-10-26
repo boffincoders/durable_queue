@@ -1,0 +1,28 @@
+name: durable_queue_encryption
+description: Encrypts durable_queue task payloads and error messages at rest with AES-256-GCM. Wraps any storage, including SQLite.
+version: 0.1.0
+repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_encryption
+issue_tracker: https://github.com/boffincoders/durable_queue/issues
+topics:
+  - queue
+  - encryption
+  - security
+  - offline
+  - persistence
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+dependencies:
+  crypto: ^3.0.7
+  cryptography: ^2.9.0
+  durable_queue: '>=0.5.4 <0.6.0'
+
+dev_dependencies:
+  durable_queue_sqlite: ^0.2.2
+  durable_queue_test_support:
+    path: ../durable_queue_test_support
+  lints: ^6.1.0
+  test: ^1.33.0

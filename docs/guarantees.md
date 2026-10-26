@@ -35,13 +35,14 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Exact timing.** A scheduled task or retry starts at or after its time, when the queue is running. Times use the device clock.
 
-**Encryption.** Task payloads and error messages are stored as plain data. Do not put secrets in them.
+**Encryption.** Task payloads and error messages are stored as plain data unless you wrap the storage with `durable_queue_encryption`. It encrypts payloads, error messages, deduplication keys, and groups with AES-256-GCM; ids, types, status, times, and idempotency keys stay readable. Either way, do not put secrets such as passwords or tokens in tasks.
 
 **Several runners on one storage.** Only one queue should run a storage at a time: a starting queue treats running tasks as interrupted. Other connections may read and enqueue. `durable_queue_workmanager`'s lease lets the app and a background job take turns. On the web, open a queue in one tab at a time.
 
 ## How we test it
 
 * Every package has its own test suite, run in CI on every push: the Dart packages with the oldest supported Dart (3.13) and the latest stable (SQLite and Dio also on macOS), the Flutter packages with the latest stable Flutter. Time-dependent behaviour is tested with `FakeQueueClock`, without waiting.
+* `durable_queue_encryption` runs the storage contract suite over memory and SQLite storage, decrypts data produced by an independent AES-GCM implementation, checks that a changed record or one copied onto another task is rejected, and runs in Chrome.
 * New features are mutation-tested: we change the code on purpose (drop a check, flip a condition) and make sure a test fails.
 * Storage adapters run a shared storage contract suite. `durable_queue_sqlite` runs it natively and in a browser (WebAssembly and IndexedDB), and is tested with several isolates writing to one file at once.
 * The [demo app](../examples/durable_queue_demo) is killed in the middle of its uploads on an Android emulator and an iOS simulator ([device tests](../.github/workflows/device-tests.yml)). The test passes only if every photo is uploaded and the step after each upload ran exactly once.

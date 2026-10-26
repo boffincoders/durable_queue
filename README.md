@@ -14,6 +14,7 @@ Full videos on real phones: [iPhone](https://github.com/boffincoders/durable_que
 |---|---|---|
 | [`durable_queue`](packages/durable_queue) | Core engine. Pure Dart, no runtime dependencies. | [![pub package](https://img.shields.io/pub/v/durable_queue.svg)](https://pub.dev/packages/durable_queue) |
 | [`durable_queue_sqlite`](packages/durable_queue_sqlite) | SQLite storage: tasks survive restarts and crashes. | [![pub package](https://img.shields.io/pub/v/durable_queue_sqlite.svg)](https://pub.dev/packages/durable_queue_sqlite) |
+| [`durable_queue_encryption`](packages/durable_queue_encryption) | Encryption at rest: wraps any storage and encrypts task payloads and error messages with AES-256-GCM. | [![pub package](https://img.shields.io/pub/v/durable_queue_encryption.svg)](https://pub.dev/packages/durable_queue_encryption) |
 | [`durable_queue_dio`](packages/durable_queue_dio) | Dio integration: HTTP retry rules, `Retry-After`, idempotency keys, cancellation, queued requests. | [![pub package](https://img.shields.io/pub/v/durable_queue_dio.svg)](https://pub.dev/packages/durable_queue_dio) |
 | [`durable_queue_flutter`](packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. | [![pub package](https://img.shields.io/pub/v/durable_queue_flutter.svg)](https://pub.dev/packages/durable_queue_flutter) |
 | [`durable_queue_connectivity`](packages/durable_queue_connectivity) | Network gate for Flutter: tasks wait while offline and start when connectivity returns, with an optional reachability check. | [![pub package](https://img.shields.io/pub/v/durable_queue_connectivity.svg)](https://pub.dev/packages/durable_queue_connectivity) |
@@ -50,16 +51,16 @@ The core engine decides *when* each task runs. Everything else plugs into one of
  connectivity          sqlite              HTTP requests, retry
  waits while offline   survives restarts   rules, Retry-After
 
-                                           durable_queue_transfer
-                                           uploads, downloads the
-                                           OS finishes in the
-                                           background
+                       durable_queue_      durable_queue_transfer
+                       encryption          uploads, downloads the
+                       encrypts what is    OS finishes in the
+                       stored              background
 
  built in:             built in:           built in:
  ManualQueueGate       MemoryQueueStorage  any async function
 ```
 
-Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
+Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
 ## See it work
 
@@ -69,6 +70,7 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 * [What durable_queue guarantees](docs/guarantees.md): what is promised, what is not, and how it is tested, including the device kill tests.
 * [Cookbook](docs/cookbook.md): offline forms, ordered chat messages, upload then notify, rate-limited sync, background jobs, progress in the UI, failed work, and testing. Every recipe is a file that CI compiles.
+* [Security policy](SECURITY.md): how to report a vulnerability privately, and what is stored in plain text.
 
 ## Get started
 

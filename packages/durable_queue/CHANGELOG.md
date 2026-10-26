@@ -2,6 +2,7 @@
 
 * README: links to the guarantees page, the cookbook, and the demo app.
 * README: a demo GIF and links to demo videos on real phones.
+* README and STORAGE.md: `durable_queue_encryption` for encryption at rest, and the security policy.
 
 ## 0.5.4
 

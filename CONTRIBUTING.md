@@ -6,6 +6,7 @@ Thanks for helping. `durable_queue` is a small execution engine, and the goal is
 
 * **Questions, ideas, and integration problems:** open a thread in [GitHub Discussions](https://github.com/boffincoders/durable_queue/discussions). Good topics: a storage backend you need, a workflow the queue cannot express yet, or an API that confused you.
 * **Bugs:** open an [issue](https://github.com/boffincoders/durable_queue/issues) with the package version, Dart or Flutter version, a minimal reproduction, and what you expected.
+* **Security problems:** do not open an issue. Report them privately as described in [SECURITY.md](SECURITY.md).
 * **Larger changes:** start a discussion first, so the design can be agreed before you write code.
 
 ## Setup
@@ -23,6 +24,7 @@ The repository is a Dart pub workspace. Each published package lives in `package
 | `packages/durable_queue` | Core engine, pure Dart |
 | `packages/durable_queue_dio` | Dio integration |
 | `packages/durable_queue_sqlite` | SQLite storage |
+| `packages/durable_queue_encryption` | Encryption at rest for any storage, pure Dart |
 | `packages/durable_queue_test_support` | Shared test helpers, including the storage contract suite. Not published. |
 | `packages/durable_queue_connectivity` | Network gate for Flutter. Needs the Flutter SDK, so it is not part of the workspace: run `flutter pub get` inside its folder. |
 | `packages/durable_queue_flutter` | Flutter integration (lifecycle, widgets). Also outside the workspace: run `flutter pub get` inside its folder. |

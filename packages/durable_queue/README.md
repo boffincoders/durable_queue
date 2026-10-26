@@ -51,6 +51,7 @@ dependencies:
 |---|---|
 | [`durable_queue`](https://pub.dev/packages/durable_queue) | The engine: tasks, retries, priorities, dependencies, rate limits, gates. |
 | [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | SQLite storage that survives restarts, on Android, iOS, macOS, Windows, Linux, and the web. |
+| [`durable_queue_encryption`](https://pub.dev/packages/durable_queue_encryption) | Encryption at rest: wraps any storage and encrypts task payloads, error messages, deduplication keys, and groups with AES-256-GCM. |
 | [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
 | [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. |
 | [`durable_queue_connectivity`](https://pub.dev/packages/durable_queue_connectivity) | A network gate for Flutter on `connectivity_plus`, with an optional reachability check against your server. |
@@ -135,16 +136,16 @@ The core engine decides *when* each task runs. Everything else plugs into one of
  connectivity          sqlite              HTTP requests, retry
  waits while offline   survives restarts   rules, Retry-After
 
-                                           durable_queue_transfer
-                                           uploads, downloads the
-                                           OS finishes in the
-                                           background
+                       durable_queue_      durable_queue_transfer
+                       encryption          uploads, downloads the
+                       encrypts what is    OS finishes in the
+                       stored              background
 
  built in:             built in:           built in:
  ManualQueueGate       MemoryQueueStorage  any async function
 ```
 
-Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
+Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
 ## How it works
 
@@ -589,7 +590,7 @@ When a task finishes, the tasks waiting on it are updated before its own result 
 
 Persistence is not background execution. A terminated app stays terminated until something else launches it. After the next launch, call `start` again.
 
-Do not put secrets in task payloads or exception text. The queue stores them as plain data. `MemoryQueueStorage` does not encrypt anything.
+Do not put secrets in task payloads or exception text. The queue stores them as plain data. To encrypt payloads and error messages at rest, wrap your storage with [`durable_queue_encryption`](https://pub.dev/packages/durable_queue_encryption). To report a vulnerability, see the [security policy](https://github.com/boffincoders/durable_queue/blob/main/SECURITY.md).
 
 The full list, including what is not promised and how it is tested on devices: [Guarantees](https://github.com/boffincoders/durable_queue/blob/main/docs/guarantees.md).
 
