@@ -109,6 +109,33 @@ jobs:
       - run: dart run example/main.dart
       - run: dart pub publish --dry-run
 
+  durable_queue_hive:
+    name: durable_queue_hive (${{ matrix.os }}, Dart ${{ matrix.sdk }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        sdk: ['3.13.0', stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_hive
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      # Includes a test that kills a writing process with SIGKILL.
+      - run: dart test
+      # On the web, Hive stores the box in IndexedDB.
+      - name: Browser tests
+        if: matrix.os == 'ubuntu-latest'
+        run: dart test -p chrome
+      - run: dart run example/main.dart
+      - run: dart pub publish --dry-run
+
   durable_queue_test_support:
     name: durable_queue_test_support
     runs-on: ubuntu-latest
