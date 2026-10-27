@@ -1,0 +1,33 @@
+name: Benchmarks
+
+# Runs benchmark/bin/benchmark.dart on GitHub's runners. Started by hand from
+# the Actions tab. The results appear in the run summary and are kept as an
+# artifact; docs/benchmarks.md reports one of these runs.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmarks:
+    name: Benchmarks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart run benchmark/bin/benchmark.dart --out results
+      - name: Summary
+        if: always()
+        run: cat results/results.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmarks-${{ matrix.os }}
+          path: results/

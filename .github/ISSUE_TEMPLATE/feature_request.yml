@@ -1,0 +1,26 @@
+name: Feature request
+description: Something the packages cannot do yet.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and where do the packages get in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: An API sketch or example code helps.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today
+      description: Workarounds or other packages you use instead.
+  - type: input
+    id: package
+    attributes:
+      label: Package
+      placeholder: durable_queue, or a new integration

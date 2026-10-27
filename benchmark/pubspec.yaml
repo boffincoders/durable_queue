@@ -1,0 +1,19 @@
+name: durable_queue_benchmark
+description: Benchmarks for the durable_queue packages. Not published.
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+dependencies:
+  durable_queue: any
+  durable_queue_encryption: any
+  durable_queue_hive: any
+  durable_queue_sqlite: any
+  hive_ce: ^2.22.0
+  sqlite3: ^3.7.0
+
+dev_dependencies:
+  lints: ^6.1.0

@@ -14,6 +14,7 @@ workspace:
   - packages/durable_queue_hive
   - packages/durable_queue_sqlite
   - packages/durable_queue_test_support
+  - benchmark
 
 # Not in the workspace: packages/durable_queue_connectivity,
 # packages/durable_queue_flutter, packages/durable_queue_transfer, and

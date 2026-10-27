@@ -151,6 +151,24 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed .
       - run: dart analyze --fatal-infos
 
+  benchmark:
+    # The benchmarks must keep working; a quick run with small sizes. The
+    # full run is the Benchmarks workflow, started by hand.
+    name: benchmark (quick run)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: benchmark
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      - run: dart run bin/benchmark.dart --quick
+
   durable_queue_connectivity:
     # A Flutter package outside the Dart workspace, resolved on its own.
     name: durable_queue_connectivity (Flutter ${{ matrix.channel }})
