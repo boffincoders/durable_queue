@@ -1,6 +1,9 @@
-## Unreleased
+## 0.5.6
+
+Documentation only; no code changes.
 
 * README: `durable_queue_hive`.
+* README: links to the benchmarks.
 
 ## 0.5.5
 

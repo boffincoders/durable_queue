@@ -71,6 +71,7 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 * [What durable_queue guarantees](docs/guarantees.md): what is promised, what is not, and how it is tested, including the device kill tests.
 * [Cookbook](docs/cookbook.md): offline forms, ordered chat messages, upload then notify, rate-limited sync, background jobs, progress in the UI, failed work, and testing. Every recipe is a file that CI compiles.
+* [Benchmarks](docs/benchmarks.md): what storing, running, and recovering tasks costs with each storage, measured on GitHub's runners, with the method.
 * [Security policy](SECURITY.md): how to report a vulnerability privately, and what is stored in plain text.
 
 ## Get started

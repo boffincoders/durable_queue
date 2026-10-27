@@ -579,7 +579,7 @@ void main() => queueStorageContractTests(MyStorage.new);
 | Testable without real waiting | Depends on your code | Depends | Yes (`FakeQueueClock`) | Limited |
 | Platforms | Any | Any | Any Dart platform | One platform per API |
 
-Use durable_queue when work must outlive a failed request or an app restart, and the app is allowed to finish it the next time it runs. Use an OS scheduler when the work must run while the app is closed; the two can be combined, with the OS job calling `start`. A plain `try`/`catch` is enough for work that is fine to lose. This table compares capabilities only; no performance benchmarks have been published.
+Use durable_queue when work must outlive a failed request or an app restart, and the app is allowed to finish it the next time it runs. Use an OS scheduler when the work must run while the app is closed; the two can be combined, with the OS job calling `start`. A plain `try`/`catch` is enough for work that is fine to lose. This table compares capabilities only. For what the queue itself costs (storing, running, and recovering tasks with each storage), see the [benchmarks](https://github.com/boffincoders/durable_queue/blob/main/docs/benchmarks.md).
 
 ## Guarantees
 
@@ -593,7 +593,7 @@ Persistence is not background execution. A terminated app stays terminated until
 
 Do not put secrets in task payloads or exception text. The queue stores them as plain data. To encrypt payloads and error messages at rest, wrap your storage with [`durable_queue_encryption`](https://pub.dev/packages/durable_queue_encryption). To report a vulnerability, see the [security policy](https://github.com/boffincoders/durable_queue/blob/main/SECURITY.md).
 
-The full list, including what is not promised and how it is tested on devices: [Guarantees](https://github.com/boffincoders/durable_queue/blob/main/docs/guarantees.md).
+The full list, including what is not promised and how it is tested on devices: [Guarantees](https://github.com/boffincoders/durable_queue/blob/main/docs/guarantees.md). Measured costs: [Benchmarks](https://github.com/boffincoders/durable_queue/blob/main/docs/benchmarks.md).
 
 ## Examples
 
