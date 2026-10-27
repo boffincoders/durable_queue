@@ -51,6 +51,7 @@ dependencies:
 |---|---|
 | [`durable_queue`](https://pub.dev/packages/durable_queue) | The engine: tasks, retries, priorities, dependencies, rate limits, gates. |
 | [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | SQLite storage that survives restarts, on Android, iOS, macOS, Windows, Linux, and the web. |
+| [`durable_queue_hive`](https://pub.dev/packages/durable_queue_hive) | Hive storage on `hive_ce`, for apps that already use Hive, on Android, iOS, macOS, Windows, Linux, and the web. |
 | [`durable_queue_encryption`](https://pub.dev/packages/durable_queue_encryption) | Encryption at rest: wraps any storage and encrypts task payloads, error messages, deduplication keys, and groups with AES-256-GCM. |
 | [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
 | [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. |
@@ -133,8 +134,8 @@ The core engine decides *when* each task runs. Everything else plugs into one of
            │                   │                    │
            │                   │                    │
  durable_queue_        durable_queue_      durable_queue_dio
- connectivity          sqlite              HTTP requests, retry
- waits while offline   survives restarts   rules, Retry-After
+ connectivity          sqlite, _hive       HTTP requests, retry
+ waits while offline   survive restarts    rules, Retry-After
 
                        durable_queue_      durable_queue_transfer
                        encryption          uploads, downloads the
@@ -145,7 +146,7 @@ The core engine decides *when* each task runs. Everything else plugs into one of
  ManualQueueGate       MemoryQueueStorage  any async function
 ```
 
-Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
+Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite or Hive when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
 ## How it works
 

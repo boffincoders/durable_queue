@@ -1,3 +1,7 @@
+## Unreleased
+
+* README: `durable_queue_hive`.
+
 ## 0.5.5
 
 Documentation only; no code changes.

@@ -14,6 +14,7 @@ Full videos on real phones: [iPhone](https://github.com/boffincoders/durable_que
 |---|---|---|
 | [`durable_queue`](packages/durable_queue) | Core engine. Pure Dart, no runtime dependencies. | [![pub package](https://img.shields.io/pub/v/durable_queue.svg)](https://pub.dev/packages/durable_queue) |
 | [`durable_queue_sqlite`](packages/durable_queue_sqlite) | SQLite storage: tasks survive restarts and crashes. | [![pub package](https://img.shields.io/pub/v/durable_queue_sqlite.svg)](https://pub.dev/packages/durable_queue_sqlite) |
+| [`durable_queue_hive`](packages/durable_queue_hive) | Hive storage (`hive_ce`) for apps that already use Hive: tasks survive restarts and crashes, on mobile, desktop, and web. | [![pub package](https://img.shields.io/pub/v/durable_queue_hive.svg)](https://pub.dev/packages/durable_queue_hive) |
 | [`durable_queue_encryption`](packages/durable_queue_encryption) | Encryption at rest: wraps any storage and encrypts task payloads and error messages with AES-256-GCM. | [![pub package](https://img.shields.io/pub/v/durable_queue_encryption.svg)](https://pub.dev/packages/durable_queue_encryption) |
 | [`durable_queue_dio`](packages/durable_queue_dio) | Dio integration: HTTP retry rules, `Retry-After`, idempotency keys, cancellation, queued requests. | [![pub package](https://img.shields.io/pub/v/durable_queue_dio.svg)](https://pub.dev/packages/durable_queue_dio) |
 | [`durable_queue_flutter`](packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. | [![pub package](https://img.shields.io/pub/v/durable_queue_flutter.svg)](https://pub.dev/packages/durable_queue_flutter) |
@@ -48,8 +49,8 @@ The core engine decides *when* each task runs. Everything else plugs into one of
            │                   │                    │
            │                   │                    │
  durable_queue_        durable_queue_      durable_queue_dio
- connectivity          sqlite              HTTP requests, retry
- waits while offline   survives restarts   rules, Retry-After
+ connectivity          sqlite, _hive       HTTP requests, retry
+ waits while offline   survive restarts    rules, Retry-After
 
                        durable_queue_      durable_queue_transfer
                        encryption          uploads, downloads the
@@ -60,7 +61,7 @@ The core engine decides *when* each task runs. Everything else plugs into one of
  ManualQueueGate       MemoryQueueStorage  any async function
 ```
 
-Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
+Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite or Hive when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
 ## See it work
 
