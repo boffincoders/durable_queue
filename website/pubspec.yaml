@@ -1,0 +1,14 @@
+name: durable_queue_website
+description: Builds the documentation site for GitHub Pages. Not published.
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+dependencies:
+  markdown: ^7.3.0
+
+dev_dependencies:
+  lints: ^6.1.0

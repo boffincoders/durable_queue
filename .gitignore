@@ -37,3 +37,6 @@ doc/
 
 # macOS
 .DS_Store
+
+# Built documentation site (website/build.dart)
+website/dist/
