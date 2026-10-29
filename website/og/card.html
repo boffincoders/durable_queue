@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Social preview card (1200x630). Render with website/og/render.sh into website/static/og.png. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Space+Grotesk:wght@600;700&display=swap">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; background: #0d0d0d; color: #ffffff; font-family: Inter, sans-serif; }
+  .card { box-sizing: border-box; width: 1200px; height: 630px; padding: 72px 80px; display: flex; flex-direction: column; border-top: 8px solid #d4a012;
+    background: radial-gradient(900px 420px at 100% 0%, rgba(212, 160, 18, 0.16), transparent 70%), #0d0d0d; }
+  .top { display: flex; align-items: center; gap: 18px; }
+  .top img { width: 72px; height: 72px; }
+  .by { font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 26px; color: #d4d4d4; }
+  h1 { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 84px; letter-spacing: -0.03em; line-height: 1.05; margin: 56px 0 18px; }
+  p { font-size: 34px; line-height: 1.35; color: #d4d4d4; margin: 0; max-width: 980px; }
+  .chips { display: flex; gap: 14px; margin-top: auto; }
+  .chips span { font-family: "JetBrains Mono", monospace; font-size: 22px; padding: 10px 18px; border: 1px solid #2a2a2a; border-radius: 999px; background: #1a1a1a; color: #e4b022; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="top"><img src="../static/brand/bc-gold.png" alt=""><span class="by">by Boffin Coders</span></div>
+  <h1>durable_queue</h1>
+  <p>Persistent, retryable tasks for Dart and Flutter</p>
+  <div class="chips"><span>survives crashes</span><span>retries with backoff</span><span>background uploads</span></div>
+</div>
+</body>
+</html>

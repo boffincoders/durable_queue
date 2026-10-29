@@ -17,7 +17,6 @@ abstract final class Site {
   static const basePath = '/durable_queue/';
   static const repo = 'https://github.com/boffincoders/durable_queue';
   static const pub = 'https://pub.dev/packages/durable_queue';
-  static const maintainer = 'https://boffincoders.com';
   static const explainer = 'https://youtu.be/6L7gFN60PmY';
   static const demoGif =
       'https://raw.githubusercontent.com/boffincoders/durable_queue/main/docs/media/durable_queue_demo_android.gif';
@@ -26,6 +25,44 @@ abstract final class Site {
   static const androidVideo =
       'https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo_android.mp4';
 }
+
+/// The maintainer, as boffincoders.com describes itself (structured data,
+/// the home page and the footer).
+abstract final class Org {
+  static const name = 'Boffin Coders';
+  static const url = 'https://boffincoders.com';
+  static const description =
+      'We design and build websites, web applications and mobile apps, and '
+      'run their SEO, for businesses and agencies.';
+  static const sameAs = [
+    'https://www.linkedin.com/company/boffincoders/',
+    'https://x.com/boffincoders',
+    'https://www.instagram.com/boffincoders/',
+    'https://www.facebook.com/boffincoders',
+    'https://github.com/boffincoders',
+  ];
+
+  /// A link to boffincoders.com, tagged so visits from these docs show up in
+  /// analytics.
+  static String link(String path, String medium) =>
+      '$url$path${path.contains('?') ? '&' : '?'}utm_source=docs&utm_medium=$medium&utm_campaign=durable_queue';
+}
+
+/// Other Boffin Coders open-source docs, linked from the footer and llms.txt.
+const sisterSites = [
+  (
+    name: 'fundamental-analysis',
+    url: 'https://boffincoders.github.io/fundamental-analysis/',
+    summary:
+        'Financial ratios and fundamental analysis for JavaScript and '
+        'TypeScript',
+  ),
+  (
+    name: 'ts-netstorageapi-akamai',
+    url: 'https://boffincoders.github.io/akamai-netstorageapi-typescript/',
+    summary: 'TypeScript client and CLI for the Akamai NetStorage HTTP API',
+  ),
+];
 
 /// A published package, shown on the home page and in the sidebar.
 final class Package {

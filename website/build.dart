@@ -341,13 +341,66 @@ String _normalize(String path) {
 
 const _icons = (
   search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
-  theme: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+  // A moon in light mode and a sun in dark mode; style.css shows one.
+  theme: '<svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4"/></svg>',
   menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
   github: '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>',
 );
 
-const _mark =
-    '<svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#3a5bd9"/><rect x="7" y="8" width="18" height="4" rx="2" fill="#e8edff"/><rect x="7" y="14" width="18" height="4" rx="2" fill="#e8edff" opacity="0.8"/><rect x="7" y="20" width="12" height="4" rx="2" fill="#7ce7b4"/></svg>';
+/// The gold Boffin Coders logo, the same in light and dark themes.
+String _logo(String r, {String cls = 'brand-mark', int size = 30}) =>
+    '<img class="$cls" src="${r}brand/bc-gold.png" alt="Boffin Coders" width="$size" height="$size">';
+
+const _org = {
+  '@type': 'Organization',
+  '@id': '${Org.url}/#organization',
+  'name': Org.name,
+  'url': Org.url,
+  'description': Org.description,
+  'logo': '${Site.url}brand/bc-gold.png',
+  'sameAs': Org.sameAs,
+};
+
+/// JSON-LD for every page: the maintainer, this site and the package, plus
+/// the page itself when it is not the home page.
+String _structuredData(String file, String fullTitle, String description) {
+  final orgRef = {'@id': _org['@id']};
+  final graph = [
+    _org,
+    {
+      '@type': 'WebSite',
+      '@id': '${Site.url}#website',
+      'name': Site.name,
+      'url': Site.url,
+      'description': Site.description,
+      'publisher': orgRef,
+    },
+    {
+      '@type': 'SoftwareSourceCode',
+      '@id': '${Site.url}#software',
+      'name': Site.name,
+      'description': Site.description,
+      'codeRepository': Site.repo,
+      'url': Site.url,
+      'programmingLanguage': 'Dart',
+      'runtimePlatform': 'Dart, Flutter',
+      'license': 'https://opensource.org/licenses/MIT',
+      'version': _version('packages/durable_queue'),
+      'author': orgRef,
+      'maintainer': orgRef,
+    },
+    if (file != 'index.html')
+      {
+        '@type': 'WebPage',
+        'name': fullTitle,
+        'description': description,
+        'url': '${Site.url}${file.replaceAll(RegExp(r'index\.html$'), '')}',
+        'isPartOf': {'@id': '${Site.url}#website'},
+        'publisher': orgRef,
+      },
+  ];
+  return '<script type="application/ld+json">${jsonEncode({'@context': 'https://schema.org', '@graph': graph}).replaceAll('</', r'<\/')}</script>';
+}
 
 String _sidebar(String r, String current) {
   String link(String href, String label, {bool mono = false}) {
@@ -383,10 +436,12 @@ void _page({
   String current = '',
   bool docs = true,
   String extraHead = '',
+  bool noindex = false,
   List<({int level, String id, String text})> headings = const [],
 }) {
   final url = file.replaceAll(RegExp(r'index\.html$'), '');
-  final r = _rootFrom(url);
+  // The 404 page is served at any depth, so it links from its <base>.
+  final r = file == '404.html' ? './' : _rootFrom(url);
   final canonical = '${Site.url}$url';
   final fullTitle = file == 'index.html'
       ? '${Site.name}: ${Site.tagline}'
@@ -410,11 +465,22 @@ void _page({
 <meta property="og:title" content="${_esc(fullTitle)}">
 <meta property="og:description" content="${_esc(description)}">
 <meta property="og:url" content="$canonical">
-<meta name="twitter:card" content="summary">
-<meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+<meta property="og:site_name" content="${Site.name} by Boffin Coders">
+<meta property="og:image" content="${Site.url}og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="${Site.name}: ${_esc(Site.tagline)}, by Boffin Coders">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="${Site.url}og.png">
+<meta name="author" content="Boffin Coders">
+${noindex ? '<meta name="robots" content="noindex">' : _structuredData(file, fullTitle, description)}
+<meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="dq-root" content="$r">
-<link rel="icon" href="${r}favicon.svg" type="image/svg+xml">
+<link rel="icon" href="${r}favicon.png" type="image/png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="${r}style.css">
 <script>try{var t=localStorage.getItem("dq-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 $extraHead
@@ -423,7 +489,7 @@ $extraHead
 <a class="skip" href="#main">Skip to content</a>
 <header class="topbar">
 <button class="icon-btn menu-btn" type="button" data-menu aria-label="Menu" aria-expanded="false">${_icons.menu}</button>
-<a class="brand" href="$r">$_mark<span>${Site.name}</span></a>
+<a class="brand" href="$r" aria-label="${Site.name} home">${_logo(r)}<span class="brand-text"><span class="brand-name">${Site.name}</span><span class="brand-by">by Boffin Coders</span></span></a>
 <nav class="topnav" aria-label="Main">$nav</nav>
 <div class="top-actions">
 <button class="search-btn" type="button" data-search aria-label="Search">${_icons.search}<span class="label">Search</span><kbd>⌘K</kbd></button>
@@ -433,7 +499,9 @@ $extraHead
 </header>
 ${docs ? '<div class="layout">${_sidebar(r, current)}<main id="main" class="content">$body</main></div>' : '<main id="main">$body</main>'}
 <footer>
-<p>${Site.name} ${_esc(_version('packages/durable_queue'))} · MIT licence · Maintained by <a href="${Site.maintainer}">Boffin Coders</a> · <a href="${Site.repo}">GitHub</a> · <a href="${Site.pub}">pub.dev</a></p>
+<a class="footer-brand" href="${Org.link('/', 'footer')}">${_logo(r, cls: 'footer-logo', size: 36)}<span>Built and maintained by Boffin Coders</span></a>
+<p>${Site.name} ${_esc(_version('packages/durable_queue'))} · MIT licence · <a href="${Site.repo}">GitHub</a> · <a href="${Site.pub}">pub.dev</a></p>
+<p>More open source by Boffin Coders: ${sisterSites.map((s) => '<a href="${s.url}">${s.name}</a>').join(' · ')} · <a href="https://github.com/boffincoders">all projects on GitHub</a></p>
 <p>Found a problem with these pages? <a href="${Site.repo}/issues">Open an issue</a>.</p>
 </footer>
 <dialog class="search" aria-label="Search the documentation"><input type="search" placeholder="Search pages and sections…" aria-label="Search"><ul></ul></dialog>
@@ -444,7 +512,11 @@ ${docs ? '<div class="layout">${_sidebar(r, current)}<main id="main" class="cont
 ''';
   _pages.add((file: file, html: html));
   if (file != '404.html') {
-    _search.add({'title': title, 'text': description, 'url': url});
+    _search.add({
+      'title': title.isEmpty ? Site.name : title,
+      'text': description,
+      'url': url,
+    });
     for (final h in headings.where((h) => h.level == 2)) {
       _search.add({
         'title': '$title › ${h.text}',
@@ -550,19 +622,6 @@ dependencies:
     title: '',
     description: Site.description,
     docs: false,
-    extraHead:
-        '<script type="application/ld+json">${jsonEncode({
-          '@context': 'https://schema.org',
-          '@type': 'SoftwareSourceCode',
-          'name': Site.name,
-          'description': Site.description,
-          'codeRepository': Site.repo,
-          'programmingLanguage': 'Dart',
-          'runtimePlatform': 'Dart, Flutter',
-          'license': 'https://opensource.org/licenses/MIT',
-          'version': core,
-          'author': {'@type': 'Organization', 'name': 'Boffin Coders', 'url': Site.maintainer},
-        })}</script>',
     body:
         '''<section class="hero">
 <p class="eyebrow">Open source · MIT · Dart &amp; Flutter</p>
@@ -629,7 +688,8 @@ ${_table(['Where', 'What the test does', 'Result'], [
 <section class="home-section diagram">
 <h2>How the packages fit together</h2>
 <p class="lead">The core decides <em>when</em> each task runs. A gate decides whether a task may start now, storage decides where tasks live, and a handler does the work.</p>
-${_pre(diagram, 'text')}
+<div class="arch">${File('${_website.path}/architecture.svg').readAsStringSync().replaceAll('{{root}}', './')}</div>
+<details class="text-version"><summary>Text version of the diagram</summary>${_pre(diagram, 'text')}</details>
 </section>
 
 <section class="home-section">
@@ -646,6 +706,17 @@ ${_pre(diagram, 'text')}
 <div class="card"><h3>Testable</h3><p>An injectable clock tests retry logic without waiting.</p></div>
 </div>
 <p style="text-align:center;margin-top:28px"><a class="btn primary" href="./guide/">Get started</a> <a class="btn" href="./cookbook/">Browse the cookbook</a></p>
+</section>
+
+<section class="home-section">
+<div class="built-by">
+<img src="./brand/bc-gold.png" alt="Boffin Coders logo" width="56" height="56">
+<div>
+<h2>Built by Boffin Coders</h2>
+<p>${_esc(Org.description)} We build and maintain durable_queue as open source. Need offline-first sync, reliable uploads or a whole Flutter app built for you?</p>
+<p class="built-by-actions"><a class="btn primary" href="${Org.link('/hire/flutter-developers', 'home')}">Hire Flutter developers</a><a class="btn" href="${Org.link('/contact-us', 'home')}">Talk to us</a><a class="btn" href="${Org.link('/', 'home')}">boffincoders.com</a></p>
+</div>
+</div>
 </section>''',
   );
 }
@@ -700,6 +771,7 @@ void _notFound() {
     title: 'Page not found',
     description: 'Page not found.',
     docs: false,
+    noindex: true,
     // Served for any missing path, so links resolve from the site root.
     extraHead: '<base href="${Site.basePath}">',
     body: '<section class="hero"><h1>Page not found</h1><p class="lead">That page does not exist. Try the <a href="./">home page</a> or press <kbd>/</kbd> to search.</p></section>',
@@ -715,10 +787,13 @@ void _write() {
       ..createSync(recursive: true)
       ..writeAsStringSync(page.html);
   }
-  for (final file in Directory(
-    '${_website.path}/static',
-  ).listSync().whereType<File>()) {
-    file.copySync('${_out.path}/${file.uri.pathSegments.last}');
+  final static = Directory('${_website.path}/static');
+  for (final file in static.listSync(recursive: true).whereType<File>()) {
+    final target = File(
+      '${_out.path}${file.path.substring(static.path.length)}',
+    );
+    target.parent.createSync(recursive: true);
+    file.copySync(target.path);
   }
   File('${_out.path}/search-index.js').writeAsStringSync(
     'window.DQ_SEARCH=${jsonEncode([
@@ -727,6 +802,39 @@ void _write() {
     ])};\n',
   );
   File('${_out.path}/.nojekyll').writeAsStringSync('');
+  File('${_out.path}/llms.txt').writeAsStringSync('''
+# ${Site.name}
+
+> ${Site.description} Open source under the MIT licence.
+
+Maintained by Boffin Coders (${Org.url}). ${Org.description}
+
+## Docs
+
+- [Overview](${Site.url}): what the queue does, quick start, how the packages fit together
+- [Guide](${Site.url}guide/): tasks, handlers, retries and backoff, priorities, dependencies, rate limits, events, recovery
+- [Cookbook](${Site.url}cookbook/): offline forms, ordered chat messages, upload then notify, rate-limited sync, background jobs, progress in the UI, testing
+- [Guarantees](${Site.url}guarantees/): what is promised, what is not, and how it is tested
+- [Benchmarks](${Site.url}benchmarks/): cost of storing, running and recovering tasks with each storage
+- [Demo app](${Site.url}demo/): a photo outbox app and the device kill tests
+- [Storage contract](${Site.url}storage-contract/): for authors of storage adapters
+- [API reference](https://pub.dev/documentation/durable_queue/latest/)
+
+## Packages
+
+${packages.map((p) => '- [${p.name}](${Site.url}${p.url}): ${p.summary} (https://pub.dev/packages/${p.name})').join('\n')}
+
+## Links
+
+- Source: ${Site.repo}
+- pub.dev: ${Site.pub}
+- Maintainer: ${Org.url}
+
+## More open source by Boffin Coders
+
+${sisterSites.map((s) => '- [${s.name}](${s.url}): ${s.summary}').join('\n')}
+- https://github.com/boffincoders
+''');
   File('${_out.path}/robots.txt').writeAsStringSync(
     'User-agent: *\nAllow: /\nSitemap: ${Site.url}sitemap.xml\n',
   );
