@@ -137,5 +137,5 @@ Licensed under the [MIT license](LICENSE).
 <p>
   <a href="https://boffincoders.com/?utm_source=github&utm_medium=readme&utm_campaign=durable_queue"><img src="website/static/brand/bc-gold.png" alt="Boffin Coders" width="36" height="36" align="left"></a>
   Built and maintained by <a href="https://boffincoders.com/?utm_source=github&utm_medium=readme&utm_campaign=durable_queue">Boffin Coders</a>.<br>
-  More open source: <a href="https://boffincoders.github.io/fundamental-analysis/">fundamental-analysis</a> · <a href="https://boffincoders.github.io/akamai-netstorageapi-typescript/">ts-netstorageapi-akamai</a> · <a href="https://github.com/boffincoders">all projects</a>
+  More open source: <a href="https://boffincoders.github.io/fundamental-analysis/">fundamental-analysis</a> · <a href="https://boffincoders.github.io/akamai-netstorageapi-typescript/">ts-netstorageapi-akamai</a> · <a href="https://boffincoders.github.io/">All Boffin Coders open source</a>
 </p>
