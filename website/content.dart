@@ -48,6 +48,9 @@ abstract final class Org {
       '$url$path${path.contains('?') ? '&' : '?'}utm_source=docs&utm_medium=$medium&utm_campaign=durable_queue';
 }
 
+/// The Boffin Coders open-source hub, which lists every project.
+const hubUrl = 'https://boffincoders.github.io/';
+
 /// Other Boffin Coders open-source docs, linked from the footer and llms.txt.
 const sisterSites = [
   (
