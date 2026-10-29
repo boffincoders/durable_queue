@@ -1,4 +1,6 @@
-## Unreleased
+## 0.5.7
+
+Documentation only; no code changes.
 
 * README: links to the 10-minute explainer and the documentation site.
 * pubspec: `documentation` points to the documentation site, and the description matches the README.
