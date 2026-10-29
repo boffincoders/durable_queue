@@ -8,7 +8,7 @@ Work such as uploads, messages, and sync is described as data, stored through a 
 
 Full videos on real phones: [iPhone](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo.mp4) (78 s) · [Android](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo_android.mp4) (103 s). Photos are queued, the app goes to the home screen, and every upload still reaches the server, including ones whose first try the server failed on purpose.
 
-**[▶ Watch the 10-minute explainer](https://youtu.be/6L7gFN60PmY)** on YouTube.
+**[▶ Watch the 10-minute explainer](https://youtu.be/6L7gFN60PmY)** on YouTube · **[Documentation site](https://boffincoders.github.io/durable_queue/)**: the guide, every package, the cookbook, guarantees, and benchmarks in one place.
 
 ## Packages
 
@@ -83,7 +83,7 @@ dependencies:
   durable_queue: ^0.5.4
 ```
 
-The [`durable_queue` README](packages/durable_queue/README.md) has the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).
+The [documentation site](https://boffincoders.github.io/durable_queue/) and the [`durable_queue` README](packages/durable_queue/README.md) have the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).
 
 ## Repository layout
 

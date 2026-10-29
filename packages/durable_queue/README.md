@@ -6,6 +6,8 @@ Persistent, retryable task execution for Dart and Flutter.
 
 Full videos on real phones: [iPhone](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo.mp4) (78 s) · [Android](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo_android.mp4) (103 s). Photos are queued, the app goes to the home screen, and every upload still reaches the server, including ones whose first try the server failed on purpose.
 
+**[▶ Watch the 10-minute explainer](https://youtu.be/6L7gFN60PmY)** on YouTube · **[Documentation site](https://boffincoders.github.io/durable_queue/)**
+
 ## The problem
 
 Apps constantly start work that must not be lost: uploading a photo, sending a message, syncing an edit. The first attempt often fails because the network drops, the server returns 503, or the user closes the app mid-request. A `try`/`catch` around the call handles one failure, but then you have to decide:
