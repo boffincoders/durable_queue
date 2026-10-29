@@ -8,11 +8,15 @@
 abstract final class Site {
   static const name = 'durable_queue';
   static const tagline = 'Persistent, retryable tasks for Dart and Flutter';
+
+  /// The home page's `<title>`.
+  static const homeTitle =
+      'durable_queue: a persistent Flutter and Dart task queue with retries';
   static const description =
-      'Persistent, retryable task execution for Dart and Flutter: tasks are '
-      'stored before enqueue returns, retried with backoff across restarts '
-      'and crashes, wait for the network, and can hand uploads to the '
-      'operating system so they finish after the app is closed.';
+      'A persistent task queue for Flutter and Dart: tasks are stored before '
+      'enqueue returns, retried with backoff across restarts and crashes, '
+      'wait for the network, and can hand uploads to the operating system so '
+      'they finish after the app is closed.';
   static const url = 'https://boffincoders.github.io/durable_queue/';
   static const basePath = '/durable_queue/';
   static const repo = 'https://github.com/boffincoders/durable_queue';
@@ -69,10 +73,23 @@ const sisterSites = [
 
 /// A published package, shown on the home page and in the sidebar.
 final class Package {
-  const Package(this.name, this.summary, {this.flutter = false});
+  const Package(
+    this.name,
+    this.summary, {
+    this.flutter = false,
+    this.metaTitle,
+    this.metaDescription,
+  });
 
   final String name;
   final String summary;
+
+  /// Overrides the page's `<title>`; the README's heading stays the same.
+  final String? metaTitle;
+
+  /// Overrides the page's meta description (by default the README's first
+  /// paragraph).
+  final String? metaDescription;
 
   /// Needs the Flutter SDK.
   final bool flutter;
@@ -117,23 +134,49 @@ const packages = [
     'A network gate: tasks wait while offline and start when the '
         'connection returns.',
     flutter: true,
+    metaTitle:
+        'durable_queue_connectivity: Flutter offline sync with a network gate',
+    metaDescription:
+        'A network gate for durable_queue, for Flutter offline sync: tasks '
+        'that need the network wait while the device is offline, without '
+        'using attempts, and start as soon as it is back online.',
   ),
   Package(
     'durable_queue_transfer',
     'Uploads and downloads the operating system finishes after the app is '
         'minimised or closed.',
     flutter: true,
+    metaTitle:
+        'durable_queue_transfer: Flutter background upload and download that '
+        'survive closing the app',
+    metaDescription:
+        'Flutter background uploads and downloads for durable_queue that keep '
+        'going after the user minimises or closes the app.',
   ),
   Package(
     'durable_queue_workmanager',
     'Runs the queue from Workmanager background jobs on Android and iOS.',
     flutter: true,
+    metaTitle:
+        'durable_queue_workmanager: Flutter Workmanager background tasks with '
+        'a persistent queue',
+    metaDescription:
+        'Run durable_queue tasks in Flutter Workmanager background jobs on '
+        'Android and iOS, so queued background tasks keep going after the user '
+        'leaves the app.',
   ),
 ];
 
 /// A page rendered from a Markdown file in the repository.
 final class DocPage {
-  const DocPage(this.source, this.url, {required this.section, this.title});
+  const DocPage(
+    this.source,
+    this.url, {
+    required this.section,
+    this.title,
+    this.metaTitle,
+    this.metaDescription,
+  });
 
   /// Path of the Markdown file, relative to the repository root.
   final String source;
@@ -146,6 +189,12 @@ final class DocPage {
 
   /// Overrides the file's first heading in the sidebar.
   final String? title;
+
+  /// Overrides the page's `<title>`.
+  final String? metaTitle;
+
+  /// Overrides the page's meta description.
+  final String? metaDescription;
 }
 
 final docPages = [
@@ -203,6 +252,8 @@ final docPages = [
       package.url,
       section: 'Packages',
       title: package.name,
+      metaTitle: package.metaTitle,
+      metaDescription: package.metaDescription,
     ),
 ];
 
@@ -213,4 +264,75 @@ const topNav = [
   ('cookbook/', 'Cookbook'),
   ('guarantees/', 'Guarantees'),
   ('benchmarks/', 'Benchmarks'),
+];
+
+/// Questions people ask about durable_queue, answered from the docs. Shown on
+/// the home page (with FAQPage structured data) and in llms.txt. Answers are
+/// HTML with `<code>` only.
+const faq = [
+  (
+    q: 'How do I make uploads survive the app being closed in Flutter?',
+    a:
+        'Hand them to the operating system with <code>durable_queue_transfer</code>: '
+        'in the task\'s handler, call <code>transfers.start(context, UploadTask(...))</code> '
+        'on a <code>QueueTransfers</code>. The upload continues while the app is in the '
+        'background or closed, and its queue task completes, with the tasks after it, the '
+        'next time the app runs. If the user force-quits the app, the system may stop the '
+        'upload until the app is opened again; it is restarted or retried then.',
+  ),
+  (
+    q: 'How do I retry failed uploads with exponential backoff in Flutter?',
+    a:
+        'Enqueue the task with <code>retryPolicy: RetryPolicy.exponential(maxAttempts: 5, '
+        'initialDelay: Duration(seconds: 1))</code>. The task is stored before '
+        '<code>enqueue</code> returns and retried with backoff across restarts and crashes; '
+        'a <code>retryIf</code> filter on <code>register</code> decides which errors are '
+        'worth retrying.',
+  ),
+  (
+    q: 'How do I queue requests while offline in Flutter?',
+    a:
+        'Add a network gate from <code>durable_queue_connectivity</code> with '
+        '<code>queue.addGate(\'network\', await ConnectivityGate.create())</code>, then '
+        'register the task type with <code>requires: {\'network\'}</code> and '
+        '<code>deferOn: deferOnConnectionError(\'network\')</code>. Tasks wait while the '
+        'device is offline without using attempts, and start as soon as a connection comes '
+        'back.',
+  ),
+  (
+    q: 'How do I run background tasks with Workmanager and a queue?',
+    a:
+        'Use <code>durable_queue_workmanager</code>: create a <code>QueueBackgroundWork</code> '
+        'with <code>openQueue</code> and <code>openLease</code>, call '
+        '<code>background.schedule()</code> in <code>main</code> and '
+        '<code>background.run(taskName)</code> in Workmanager\'s callback, and run the app\'s '
+        'queue through a <code>LeasedQueueRunner</code>. The lease keeps the app and the job '
+        'from running the queue at once. Android runs the jobs at most every 15 minutes, for '
+        'up to about 10 minutes; iOS decides when, and gives each about 30 seconds.',
+  ),
+  (
+    q: 'Does durable_queue run each task exactly once?',
+    a:
+        'No. Every task runs at least once, until it succeeds or its attempts run out. If the '
+        'app dies after a handler\'s side effect but before the result is written, the task '
+        'runs again, so send the task\'s <code>context.idempotencyKey</code> to your server '
+        'and let it drop the repeat.',
+  ),
+  (
+    q: 'How do I encrypt queued data?',
+    a:
+        'Wrap the storage with <code>durable_queue_encryption</code>: '
+        '<code>EncryptedQueueStorage(SqliteQueueStorage.open(path), cipher: '
+        'AesGcmCipher(key))</code>, with a 32-byte key from '
+        '<code>AesGcmCipher.generateKey()</code> kept in the platform\'s secure storage. '
+        'Payloads, error messages, deduplication keys and groups are encrypted with '
+        'AES-256-GCM.',
+  ),
+  (
+    q: 'Does durable_queue need Flutter?',
+    a:
+        'No. The core package, <code>durable_queue</code>, is pure Dart with no runtime '
+        'dependencies, and runs on Android, iOS, the web and desktop. The Flutter packages '
+        'add app lifecycle and widgets, connectivity, background transfers and Workmanager.',
+  ),
 ];

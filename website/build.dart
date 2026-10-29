@@ -389,6 +389,19 @@ String _structuredData(String file, String fullTitle, String description) {
       'author': orgRef,
       'maintainer': orgRef,
     },
+    if (file == 'index.html')
+      {
+        '@type': 'FAQPage',
+        '@id': '${Site.url}#faq',
+        'mainEntity': [
+          for (final f in faq)
+            {
+              '@type': 'Question',
+              'name': f.q,
+              'acceptedAnswer': {'@type': 'Answer', 'text': _text(f.a)},
+            },
+        ],
+      },
     if (file != 'index.html')
       {
         '@type': 'WebPage',
@@ -437,15 +450,16 @@ void _page({
   bool docs = true,
   String extraHead = '',
   bool noindex = false,
+  String? metaTitle,
   List<({int level, String id, String text})> headings = const [],
 }) {
   final url = file.replaceAll(RegExp(r'index\.html$'), '');
   // The 404 page is served at any depth, so it links from its <base>.
   final r = file == '404.html' ? './' : _rootFrom(url);
   final canonical = '${Site.url}$url';
-  final fullTitle = file == 'index.html'
-      ? '${Site.name}: ${Site.tagline}'
-      : '$title · ${Site.name}';
+  final fullTitle =
+      metaTitle ??
+      (file == 'index.html' ? Site.homeTitle : '$title · ${Site.name}');
   final nav = topNav
       .map(
         (e) =>
@@ -708,6 +722,11 @@ ${_table(['Where', 'What the test does', 'Result'], [
 <p style="text-align:center;margin-top:28px"><a class="btn primary" href="./guide/">Get started</a> <a class="btn" href="./cookbook/">Browse the cookbook</a></p>
 </section>
 
+<section class="home-section faq">
+<h2>Questions</h2>
+${faq.map((f) => '<details><summary>${_esc(f.q)}</summary><p>${f.a}</p></details>').join('\n')}
+</section>
+
 <section class="home-section">
 <div class="built-by">
 <img src="./brand/bc-gold.png" alt="Boffin Coders logo" width="56" height="56">
@@ -757,7 +776,8 @@ void _docPage(DocPage page, _Rendered rendered) {
     file: '${page.url}index.html',
     current: page.url,
     title: rendered.title,
-    description: rendered.description,
+    metaTitle: page.metaTitle,
+    description: page.metaDescription ?? rendered.description,
     headings: rendered.headings,
     body:
         '<p class="eyebrow">${_esc(page.section)}</p>$body'
@@ -802,12 +822,39 @@ void _write() {
     ])};\n',
   );
   File('${_out.path}/.nojekyll').writeAsStringSync('');
+  final core = _version('packages/durable_queue');
   File('${_out.path}/llms.txt').writeAsStringSync('''
 # ${Site.name}
 
 > ${Site.description} Open source under the MIT licence.
 
 Maintained by Boffin Coders (${Org.url}). ${Org.description}
+
+The full text of these docs, as one plain-text file: ${Site.url}llms-full.txt
+
+## Key facts
+
+- Package: durable_queue $core in this repository (latest release: ${Site.pub})
+- Licence: MIT
+- Core: pure Dart, no runtime dependencies; runs on Android, iOS, the web and desktop
+- Every package has its own test suite, run in CI on every push; the demo app is killed in the middle of its uploads on an Android emulator and an iOS simulator in CI (device tests: ${Site.repo}/actions/workflows/device-tests.yml)
+- Packages:
+${packages.map((p) => '  - [${p.name}](${Site.url}${p.url}) ${_version(p.dir)}${p.flutter ? ' (Flutter)' : ''}: ${p.summary}').join('\n')}
+
+## Guarantees and what it does not promise
+
+- A task is stored before `enqueue` returns (with durable_queue_sqlite, a committed SQLite transaction).
+- Every task runs at least once, until it succeeds or its attempts run out; a task interrupted by a crash or a kill is found when the queue next starts, and its retry policy decides what follows.
+- Attempts are bounded by `maxAttempts`; waiting for a closed gate (no network) or a rate-limit slot does not use attempts.
+- A task never starts before the tasks it depends on have completed.
+- Not exactly once: if the app dies after a side effect but before the result is stored, the task runs again. Send the task's idempotency key so the server can drop the repeat.
+- The core queue runs while the app's process runs. durable_queue_transfer hands uploads and downloads to the system's background transfer service; durable_queue_workmanager runs the queue in Workmanager jobs, within what the operating system allows.
+- Rate limits are kept in memory and start empty after a restart.
+- Full list: ${Site.url}guarantees/
+
+## FAQ
+
+${faq.map((f) => '### ${f.q}\n\n${_text(f.a.replaceAll('<code>', '`').replaceAll('</code>', '`'))}').join('\n\n')}
 
 ## Docs
 
@@ -817,12 +864,13 @@ Maintained by Boffin Coders (${Org.url}). ${Org.description}
 - [Guarantees](${Site.url}guarantees/): what is promised, what is not, and how it is tested
 - [Benchmarks](${Site.url}benchmarks/): cost of storing, running and recovering tasks with each storage
 - [Demo app](${Site.url}demo/): a photo outbox app and the device kill tests
+- [Security policy](${Site.url}security/): reporting a vulnerability, and what is stored in plain text
 - [Storage contract](${Site.url}storage-contract/): for authors of storage adapters
+- [Contributing](${Site.url}contributing/)
+- [All packages](${Site.url}packages/)
 - [API reference](https://pub.dev/documentation/durable_queue/latest/)
-
-## Packages
-
-${packages.map((p) => '- [${p.name}](${Site.url}${p.url}): ${p.summary} (https://pub.dev/packages/${p.name})').join('\n')}
+- [10-minute explainer video](${Site.explainer})
+- [Uploads that survive a crash](${Org.url}/architecture/uploads-that-survive-a-crash): the architecture behind it, on boffincoders.com
 
 ## Links
 
@@ -836,6 +884,17 @@ ${sisterSites.map((s) => '- [${s.name}](${s.url}): ${s.summary}').join('\n')}
 - [All Boffin Coders open source]($hubUrl)
 - https://github.com/boffincoders
 ''');
+  // Every docs page as Markdown, for assistants that read one file.
+  File('${_out.path}/llms-full.txt').writeAsStringSync(
+    [
+      '# ${Site.name}: full documentation\n\n> ${Site.description}\n\n'
+          'Source: ${Site.repo} · Docs: ${Site.url} · '
+          'Maintained by Boffin Coders (${Org.url})',
+      for (final source in ['README.md', for (final p in docPages) p.source])
+        '---\n\nFile: $_blob$source\n\n'
+            '${File('${_root.path}/$source').readAsStringSync().trim()}',
+    ].join('\n\n'),
+  );
   File('${_out.path}/robots.txt').writeAsStringSync(
     'User-agent: *\nAllow: /\nSitemap: ${Site.url}sitemap.xml\n',
   );
