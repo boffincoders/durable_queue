@@ -513,7 +513,7 @@ $extraHead
 </header>
 ${docs ? '<div class="layout">${_sidebar(r, current)}<main id="main" class="content">$body</main></div>' : '<main id="main">$body</main>'}
 <footer>
-<a class="footer-brand" href="${Org.link('/', 'footer')}">${_logo(r, cls: 'footer-logo', size: 36)}<span>Built and maintained by Boffin Coders</span></a>
+<a class="footer-brand" href="${Org.link('/open-source/durable-queue', 'footer')}">${_logo(r, cls: 'footer-logo', size: 36)}<span>Built and maintained by Boffin Coders</span></a>
 <p>${Site.name} ${_esc(_version('packages/durable_queue'))} · MIT licence · <a href="${Site.repo}">GitHub</a> · <a href="${Site.pub}">pub.dev</a></p>
 <p>More open source by Boffin Coders: ${sisterSites.map((s) => '<a href="${s.url}">${s.name}</a>').join(' · ')} · <a href="$hubUrl">All Boffin Coders open source</a></p>
 <p>Found a problem with these pages? <a href="${Site.repo}/issues">Open an issue</a>.</p>
@@ -876,7 +876,7 @@ ${faq.map((f) => '### ${f.q}\n\n${_text(f.a.replaceAll('<code>', '`').replaceAll
 
 - Source: ${Site.repo}
 - pub.dev: ${Site.pub}
-- Maintainer: ${Org.url}
+- Maintainer: ${Org.url} (project page: ${Org.url}/open-source/durable-queue)
 
 ## More open source by Boffin Coders
 
