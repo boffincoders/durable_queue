@@ -709,7 +709,7 @@ ${_table(['Where', 'What the test does', 'Result'], [
 <section class="home-section">
 <h2>Everything you need</h2>
 <div class="grid">
-<div class="card"><h3>Retries that make sense</h3><p>Fixed or exponential backoff with jitter, a <code>retryIf</code> filter, and <code>Retry-After</code> with Dio.</p></div>
+<div class="card"><h3>Retries that make sense</h3><p>Fixed or exponential backoff with optional jitter, a <code>retryIf</code> filter, and <code>Retry-After</code> with Dio.</p></div>
 <div class="card"><h3>Dependencies and chains</h3><p>"Upload, then tell the server": a task starts only after the ones it depends on completed.</p></div>
 <div class="card"><h3>Waits for the network</h3><p>Tasks wait while offline without using attempts, and start when the connection returns.</p></div>
 <div class="card"><h3>Deduplication</h3><p>A deduplication key stops a double tap from queuing the same work twice.</p></div>
@@ -837,7 +837,7 @@ The full text of these docs, as one plain-text file: ${Site.url}llms-full.txt
 - Package: durable_queue $core in this repository (latest release: ${Site.pub})
 - Licence: MIT
 - Core: pure Dart, no runtime dependencies; runs on Android, iOS, the web and desktop
-- Every package has its own test suite, run in CI on every push; the demo app is killed in the middle of its uploads on an Android emulator and an iOS simulator in CI (device tests: ${Site.repo}/actions/workflows/device-tests.yml)
+- Every package has its own test suite, run in CI on every push. The demo app is killed in the middle of its uploads on an Android emulator and an iOS simulator by a CI job that runs when code the demo uses changes, and on demand (device tests: ${Site.repo}/actions/workflows/device-tests.yml)
 - Packages:
 ${packages.map((p) => '  - [${p.name}](${Site.url}${p.url}) ${_version(p.dir)}${p.flutter ? ' (Flutter)' : ''}: ${p.summary}').join('\n')}
 

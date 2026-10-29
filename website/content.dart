@@ -13,10 +13,11 @@ abstract final class Site {
   static const homeTitle =
       'durable_queue: a persistent Flutter and Dart task queue with retries';
   static const description =
-      'A persistent task queue for Flutter and Dart: tasks are stored before '
-      'enqueue returns, retried with backoff across restarts and crashes, '
-      'wait for the network, and can hand uploads to the operating system so '
-      'they finish after the app is closed.';
+      'A persistent task queue for Flutter and Dart: with SQLite or Hive '
+      'storage, tasks are stored before enqueue returns and retried with '
+      'backoff across restarts and crashes; they wait for the network, and '
+      'can hand uploads to the operating system so they finish after the app '
+      'is closed.';
   static const url = 'https://boffincoders.github.io/durable_queue/';
   static const basePath = '/durable_queue/';
   static const repo = 'https://github.com/boffincoders/durable_queue';
@@ -284,10 +285,10 @@ const faq = [
     q: 'How do I retry failed uploads with exponential backoff in Flutter?',
     a:
         'Enqueue the task with <code>retryPolicy: RetryPolicy.exponential(maxAttempts: 5, '
-        'initialDelay: Duration(seconds: 1))</code>. The task is stored before '
-        '<code>enqueue</code> returns and retried with backoff across restarts and crashes; '
-        'a <code>retryIf</code> filter on <code>register</code> decides which errors are '
-        'worth retrying.',
+        'initialDelay: Duration(seconds: 1))</code>. With SQLite or Hive storage the task '
+        'is stored before <code>enqueue</code> returns, so its retries continue across '
+        'restarts and crashes; a <code>retryIf</code> filter on <code>register</code> '
+        'decides which errors are worth retrying.',
   ),
   (
     q: 'How do I queue requests while offline in Flutter?',
