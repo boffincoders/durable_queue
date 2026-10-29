@@ -26,6 +26,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Fixed and exponential retry with optional jitter, and a `retryIf` filter
 * Concurrency limits and priorities
 * Scheduled tasks: start at a given time or after a delay
+* Timeouts per task type, and tasks that expire if they have not started in time
 * Rate limits per task type, or per key such as an API host
 * Gates: tasks that need the network wait while offline, without using attempts
 * Task dependencies, chains, and groups
@@ -33,7 +34,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Cooperative cancellation, pause, resume, and stop
 * `drain`: run what is ready within a time limit, for background jobs
 * Hand-off: a task can wait for work the operating system finishes, such as a background upload
-* Lifecycle events and queries by status or group
+* Lifecycle events, queries by status or group, counts per status, and `waitFor` one task
 * Startup recovery of tasks interrupted by a crash
 * An injectable clock, so retry logic is testable without waiting
 * Pure Dart: no HTTP client, database, Flutter, or state-management dependency
@@ -278,6 +279,32 @@ The task is stored at once and starts when its time comes and a slot is free. Wh
 
 The queue only runs while your app runs: a task scheduled for 3 a.m. starts at 3 a.m. if the app is running then, or on the next launch otherwise.
 
+## Timeouts and expiry
+
+Give a task type a `timeout` so a hung request or a stuck handler cannot hold a slot forever:
+
+```dart
+queue.register<UploadTask>(
+  type: 'upload',
+  decoder: UploadTask.fromJson,
+  handler: upload,
+  timeout: Duration(minutes: 2),
+);
+```
+
+An attempt that runs longer fails with `TaskTimeoutException`, and `retryIf` and the retry policy decide what happens next, as for any other error. Dart cannot stop a running function, so the handler keeps running and its result is ignored; `context.whenCancellationRequested` completes at the timeout, so a handler that listens for it (for example with a Dio `CancelToken`) stops its work. Time a transfer spends handed off to the operating system does not count.
+
+Give a task an expiry with `expiresAt` or `expiresAfter` when it is pointless after a while, such as a "typing" notice or a one-time code:
+
+```dart
+await queue.enqueue(
+  SendTypingTask(chatId),
+  expiresAfter: Duration(seconds: 30),
+);
+```
+
+A task that has not started by then is cancelled instead of started: it emits `TaskCancelled`, `lastFailure` holds a `TaskExpiredException`, and tasks that depend on it settle as for any cancellation. A running attempt is not interrupted, but no retry starts after the expiry. `retry` clears an expiry that has passed. `enqueueChain` applies the expiry to every step.
+
 ## Priorities
 
 ```dart
@@ -506,7 +533,15 @@ queue.events.listen((event) {
 });
 
 final failed = await queue.getTasks(status: TaskStatus.failed);
+
+final counts = await queue.counts(group: 'uploads');
+print('${counts[TaskStatus.pending]} uploads waiting');
+
+final done = await queue.waitFor(taskId, timeout: Duration(minutes: 1));
+if (done.status != TaskStatus.completed) print(done.lastFailure);
 ```
+
+`counts` returns every status, with zero for the ones no task is in. `waitFor` returns the task's record once it is completed, failed, or cancelled (at once if it already is); it does not start the queue.
 
 `TaskDeferred` says why a task waits (`rateLimit`, `gateClosed`, or `gateError`), which limit or gate is responsible, and until when.
 

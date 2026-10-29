@@ -150,6 +150,12 @@ extension DurableQueueDio on DurableQueue {
   /// [onResponse] runs after each successful request; it is not persisted,
   /// so register it again on every launch. If it throws, the attempt fails.
   ///
+  /// [successStatusCodes] lists statuses that complete the task even though
+  /// Dio rejects them, for example `{409}` for an API that answers a request
+  /// it has already processed (same idempotency key) with 409 Conflict.
+  /// [onResponse] receives that response. Without it, such a retry after a
+  /// lost response would fail the task although the server did the work.
+  ///
   /// When a response is a 429 or 503 with a `Retry-After` header that
   /// [rules] honors, and a per-host limit named [hostRateLimit] exists (see
   /// [addHttpHostRateLimit]), that host's bucket is held for the
@@ -162,7 +168,9 @@ extension DurableQueueDio on DurableQueue {
   /// requests wait while it is closed, use `rules.deferOn('network')` so a
   /// connection error waits for the gate instead of using an attempt, and set
   /// [rateLimit] to limit all queued requests together. For a limit per host,
-  /// use [addHttpHostRateLimit].
+  /// use [addHttpHostRateLimit]. [timeout] is passed to
+  /// `DurableQueue.register` as well: an attempt that takes longer fails
+  /// and its request is cancelled.
   void registerHttpRequests(
     Dio dio, {
     DioRetryRules rules = const DioRetryRules(),
@@ -172,6 +180,8 @@ extension DurableQueueDio on DurableQueue {
     DeferOnError? deferOn,
     RateLimit? rateLimit,
     String? hostRateLimit = defaultHostRateLimit,
+    Set<int> successStatusCodes = const {},
+    Duration? timeout,
   }) {
     register<HttpRequestTask>(
       type: HttpRequestTask.taskType,
@@ -194,6 +204,13 @@ extension DurableQueueDio on DurableQueue {
             cancelToken: context.dioCancelToken(),
           );
         } on DioException catch (error, stackTrace) {
+          final rejected = error.response;
+          if (error.type == DioExceptionType.badResponse &&
+              rejected != null &&
+              successStatusCodes.contains(rejected.statusCode)) {
+            await onResponse?.call(task, rejected, context);
+            return;
+          }
           _holdHost(dio, rules, hostRateLimit, task, error, stackTrace);
           rethrow;
         }
@@ -204,6 +221,7 @@ extension DurableQueueDio on DurableQueue {
       requires: requires,
       deferOn: deferOn,
       rateLimit: rateLimit,
+      timeout: timeout,
     );
   }
 

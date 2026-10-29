@@ -1,3 +1,9 @@
+## 0.1.2
+
+Documentation only; no code changes.
+
+* pubspec: a screenshot for pub.dev.
+
 ## 0.1.1
 
 Documentation only; no code changes.

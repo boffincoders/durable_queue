@@ -78,6 +78,48 @@ final class TaskInterruptedException implements Exception {
       'TaskInterruptedException: task was still running when the queue restarted';
 }
 
+/// Recorded when a handler did not return within its task type's
+/// `timeout` (see `DurableQueue.register`).
+///
+/// The attempt fails with this error and the retry rules decide what
+/// happens next, as for any other handler error. Dart cannot stop a running
+/// function, so the handler itself keeps running; its result is ignored.
+final class TaskTimeoutException implements Exception {
+  /// Creates a timeout record for [taskId] after [timeout].
+  const TaskTimeoutException({required this.taskId, required this.timeout});
+
+  /// The task whose attempt timed out.
+  final String taskId;
+
+  /// The time limit that was exceeded.
+  final Duration timeout;
+
+  @override
+  String toString() =>
+      'TaskTimeoutException: task "$taskId" did not finish within $timeout';
+}
+
+/// Recorded when a task reached its expiry time before it could start
+/// (see `DurableQueue.enqueue(expiresAt:)`).
+///
+/// The queue does not throw this to application code. The task is cancelled
+/// and this is stored as its [TaskFailure].
+final class TaskExpiredException implements Exception {
+  /// Creates an expiry record for [taskId], which expired at [expiresAt].
+  const TaskExpiredException({required this.taskId, required this.expiresAt});
+
+  /// The task that expired.
+  final String taskId;
+
+  /// When it expired.
+  final DateTime expiresAt;
+
+  @override
+  String toString() =>
+      'TaskExpiredException: task "$taskId" expired at '
+      '${expiresAt.toIso8601String()} before it could start';
+}
+
 /// A worker storage operation failed and will be retried.
 ///
 /// Delivered as a value on `DurableQueue.storageErrors`. The original error is

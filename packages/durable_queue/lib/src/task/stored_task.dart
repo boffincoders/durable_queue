@@ -39,6 +39,7 @@ final class StoredTask {
     this.onDependencyFailure = DependencyFailurePolicy.cancel,
     this.group,
     this.handOffReference,
+    this.expiresAt,
   }) : payload = _freezeMap(payload),
        dependsOn = List<String>.unmodifiable(LinkedHashSet.of(dependsOn)) {
     if (id.isEmpty) {
@@ -157,11 +158,18 @@ final class StoredTask {
   bool get isHandedOff =>
       status == TaskStatus.running && handOffReference != null;
 
+  /// When the task stops being worth running, or null if it never expires.
+  ///
+  /// A task that has not started by then is cancelled instead of started,
+  /// with a [TaskFailure] describing the expiry. A running attempt is not
+  /// interrupted. Set by `DurableQueue.enqueue(expiresAt:)`.
+  final DateTime? expiresAt;
+
   /// Returns a copy with the given fields replaced.
   ///
   /// Nullable fields use a sentinel so they can be cleared. Pass `null` to
   /// clear [nextAttemptAt], [deduplicationKey], [idempotencyKey],
-  /// [lastFailure], [group], or [handOffReference].
+  /// [lastFailure], [group], [handOffReference], or [expiresAt].
   StoredTask copyWith({
     String? id,
     String? type,
@@ -182,6 +190,7 @@ final class StoredTask {
     DependencyFailurePolicy? onDependencyFailure,
     Object? group = _unset,
     Object? handOffReference = _unset,
+    Object? expiresAt = _unset,
   }) {
     return StoredTask(
       id: id ?? this.id,
@@ -213,6 +222,9 @@ final class StoredTask {
       handOffReference: identical(handOffReference, _unset)
           ? this.handOffReference
           : handOffReference as String?,
+      expiresAt: identical(expiresAt, _unset)
+          ? this.expiresAt
+          : expiresAt as DateTime?,
     );
   }
 
@@ -237,6 +249,7 @@ final class StoredTask {
     'onDependencyFailure': onDependencyFailure.name,
     'group': group,
     'handOffReference': handOffReference,
+    'expiresAt': expiresAt?.toIso8601String(),
   };
 
   /// Restores a record produced by [toJson].
@@ -245,6 +258,7 @@ final class StoredTask {
   /// `onDependencyFailure`, or `group` keys. They load with priority zero, no
   /// dependencies, [DependencyFailurePolicy.cancel], and no group. Records
   /// written before 0.5.4 have no `handOffReference` and load without one.
+  /// Records written before 0.5.8 have no `expiresAt` and never expire.
   factory StoredTask.fromJson(Map<String, dynamic> json) {
     final statusName = _requireString(json, 'status');
     final status = TaskStatus.values.where((value) => value.name == statusName);
@@ -278,6 +292,7 @@ final class StoredTask {
       onDependencyFailure: _dependencyPolicy(json),
       group: _optionalString(json, 'group'),
       handOffReference: _optionalString(json, 'handOffReference'),
+      expiresAt: _optionalDateTime(json, 'expiresAt'),
     );
   }
 

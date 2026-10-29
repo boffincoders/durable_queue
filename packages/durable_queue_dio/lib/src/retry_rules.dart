@@ -40,7 +40,9 @@ final class DioRetryRules {
   /// HTTP status codes that are retried. Every other status fails the task.
   final Set<int> retryStatusCodes;
 
-  /// Whether connect, send, and receive timeouts are retried.
+  /// Whether connect, send, and receive timeouts are retried, and attempts
+  /// that ran past the `timeout` given to `DurableQueue.register`
+  /// ([TaskTimeoutException]).
   final bool retryTimeouts;
 
   /// Whether connection failures (DNS, refused, reset, offline) are retried.
@@ -57,11 +59,13 @@ final class DioRetryRules {
 
   /// Whether [error] should be retried.
   ///
-  /// Only [DioException]s are retried. Cancellation, certificate errors,
+  /// Only [DioException]s and, with [retryTimeouts], [TaskTimeoutException]
+  /// are retried. Cancellation, certificate errors,
   /// response-transform timeouts, unknown errors, and status codes outside
   /// [retryStatusCodes] are not. Combine this with your own predicate if your
   /// handler throws other retryable errors.
   bool shouldRetry(Object error, StackTrace stackTrace) {
+    if (error is TaskTimeoutException) return retryTimeouts;
     if (error is! DioException) return false;
     final type = error.type;
     if (type == DioExceptionType.connectionTimeout ||

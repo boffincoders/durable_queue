@@ -1,6 +1,6 @@
 name: durable_queue_transfer
 description: Uploads and downloads for durable_queue that keep going after the app is minimised or closed, run by background_downloader, with the queue's retries and dependencies.
-version: 0.1.1
+version: 0.1.2
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_transfer
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:
@@ -9,6 +9,9 @@ topics:
   - download
   - background
   - offline
+screenshots:
+  - description: Photo uploads that finish after the app is closed, shown by the demo app and its test server.
+    path: screenshots/demo.webp
 
 environment:
   sdk: ^3.13.0

@@ -22,6 +22,8 @@ final class Harness {
     Set<String> requires = const {},
     DeferOnError? deferOn,
     RateLimit? rateLimit,
+    Set<int> successStatusCodes = const {},
+    Duration? timeout,
   }) {
     queue = DurableQueue(
       storage: storage ?? MemoryQueueStorage(),
@@ -36,6 +38,8 @@ final class Harness {
       requires: requires,
       deferOn: deferOn,
       rateLimit: rateLimit,
+      successStatusCodes: successStatusCodes,
+      timeout: timeout,
     );
     queue.events.listen(events.add);
   }
@@ -150,6 +154,67 @@ void main() {
     final task = (await h.queue.getTask(id))!;
     expect(task.status, TaskStatus.failed);
     expect(task.lastFailure?.error, contains('422'));
+  });
+
+  test('successStatusCodes completes on a listed rejection', () async {
+    server.script('/charge', [
+      respond(409, body: {'error': 'already processed'}),
+    ]);
+    Response<Object?>? seen;
+    final h = Harness(
+      server,
+      successStatusCodes: {409},
+      onResponse: (task, response, context) => seen = response,
+    );
+    await h.queue.start();
+    final id = await h.queue.enqueue(
+      HttpRequestTask(method: 'POST', url: server.url('/charge'), body: {}),
+      idempotencyKey: 'charge-1',
+      retryPolicy: retries,
+    );
+    await h.until(() => h.of<TaskCompleted>().isNotEmpty);
+    expect((await h.queue.getTask(id))!.status, TaskStatus.completed);
+    expect(seen?.statusCode, 409);
+    expect(seen?.data, {'error': 'already processed'});
+  });
+
+  test('statuses not in successStatusCodes still fail', () async {
+    server.script('/charge', [
+      respond(422, body: {'error': 'invalid'}),
+    ]);
+    final h = Harness(server, successStatusCodes: {409});
+    await h.queue.start();
+    final id = await h.queue.enqueue(
+      HttpRequestTask(method: 'POST', url: server.url('/charge'), body: {}),
+      retryPolicy: retries,
+    );
+    await h.until(() => h.of<TaskFailed>().isNotEmpty);
+    expect((await h.queue.getTask(id))!.lastFailure?.error, contains('422'));
+  });
+
+  test('timeout fails a slow attempt, which is retried', () async {
+    final release = Completer<void>();
+    server.script('/slow', [
+      holdUntil(release.future),
+      respond(200, body: {'ok': true}),
+    ]);
+    final h = Harness(server, timeout: const Duration(seconds: 30));
+    await h.queue.start();
+    final id = await h.queue.enqueue(
+      HttpRequestTask(method: 'GET', url: server.url('/slow')),
+      retryPolicy: retries,
+    );
+    await h.until(() => server.received.isNotEmpty);
+    h.clock.advance(const Duration(seconds: 30));
+    await h.until(() => h.of<TaskRetryScheduled>().isNotEmpty);
+    expect(
+      (await h.queue.getTask(id))!.lastFailure?.error,
+      contains('TaskTimeoutException'),
+    );
+    h.clock.advance(const Duration(seconds: 1));
+    await h.until(() => h.of<TaskCompleted>().isNotEmpty);
+    expect(server.received, hasLength(2));
+    release.complete();
   });
 
   test('a refused connection is retried', () async {

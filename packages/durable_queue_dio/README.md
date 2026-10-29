@@ -40,6 +40,18 @@ await queue.enqueue(
 
 Pass `onResponse` to `registerHttpRequests` to read successful responses. It is not stored, so register it on every launch.
 
+Some APIs answer a repeated request, with an idempotency key they have already seen, with 409 Conflict. If the first response was lost, the retry would fail the task although the server did the work. List such statuses in `successStatusCodes` to complete the task instead; `onResponse` receives that response:
+
+```dart
+queue.registerHttpRequests(
+  dio,
+  successStatusCodes: {409},
+  timeout: Duration(seconds: 60),
+);
+```
+
+`timeout` is passed to `DurableQueue.register`: an attempt that takes longer is aborted and counts as a failed attempt, which the rules retry like a Dio timeout.
+
 Everything in an `HttpRequestTask` is stored as plain JSON. **Do not put credentials in its headers.** Add them when the request is sent, with a Dio interceptor:
 
 ```dart
@@ -122,11 +134,12 @@ queue.addHttpHostRateLimit(
 | Error | Default |
 |---|---|
 | Connect, send, or receive timeout | Retry |
+| Attempt longer than `register(timeout:)` (`TaskTimeoutException`) | Retry |
 | Connection error (offline, DNS, refused, reset) | Retry |
 | HTTP 408, 425, 429, 500, 502, 503, 504 | Retry |
 | Other HTTP statuses | Fail |
 | Cancelled, bad certificate, transform timeout, unknown | Fail |
-| Errors that are not `DioException` | Fail (combine with your own `retryIf`) |
+| Other errors that are not `DioException` | Fail (combine with your own `retryIf`) |
 
 `Retry-After` (seconds or an HTTP-date) sets the wait before the next attempt, capped by `maxRetryAfter` (one hour by default). Without it, the task's `RetryPolicy` decides. Retries always count toward `maxAttempts`.
 
@@ -145,7 +158,7 @@ queue.registerHttpRequests(dio, rules: rules, idempotencyHeader: 'X-Request-Id')
 
 * Delivery is at least once. If the app dies after the server handled a request but before the result was saved, the request is sent again. The idempotency key lets a server that supports it ignore the duplicate.
 * The queue runs while your app runs. Requests stored with `durable_queue_sqlite` are sent the next time the app starts the queue.
-* Responses outside Dio's accepted range (2xx by default) count as failures.
+* Responses outside Dio's accepted range (2xx by default) count as failures, except statuses listed in `successStatusCodes`.
 
 ## Example
 

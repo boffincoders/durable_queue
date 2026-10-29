@@ -21,6 +21,7 @@ StoredTask storedTask({
   DependencyFailurePolicy onDependencyFailure = DependencyFailurePolicy.cancel,
   String? group,
   String? handOffReference,
+  DateTime? expiresAt,
 }) {
   final created = createdAt ?? DateTime.utc(2026, 1, 1);
   return StoredTask(
@@ -43,5 +44,6 @@ StoredTask storedTask({
     onDependencyFailure: onDependencyFailure,
     group: group,
     handOffReference: handOffReference,
+    expiresAt: expiresAt,
   );
 }

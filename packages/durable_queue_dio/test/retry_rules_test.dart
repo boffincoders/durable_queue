@@ -22,6 +22,11 @@ DioException dioError(
   );
 }
 
+const queueTimeout = TaskTimeoutException(
+  taskId: 't',
+  timeout: Duration(seconds: 1),
+);
+
 void main() {
   const rules = DioRetryRules();
   final trace = StackTrace.empty;
@@ -104,6 +109,8 @@ void main() {
         custom.shouldRetry(dioError(DioExceptionType.receiveTimeout), trace),
         isFalse,
       );
+      expect(custom.shouldRetry(queueTimeout, trace), isFalse);
+      expect(rules.shouldRetry(queueTimeout, trace), isTrue);
       expect(
         custom.shouldRetry(dioError(DioExceptionType.connectionError), trace),
         isFalse,

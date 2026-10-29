@@ -1,3 +1,22 @@
+## 0.5.8
+
+New features, no breaking changes. Storage adapters must persist the new
+`StoredTask.expiresAt` field (see STORAGE.md); adapters that store the
+`toJson` record, like `durable_queue_sqlite` and `durable_queue_hive`, need
+no change.
+
+* `register(timeout:)`: an attempt that runs longer fails with
+  `TaskTimeoutException`, and the retry rules decide what happens next.
+  `context.whenCancellationRequested` completes at the timeout, so handlers
+  that listen for it stop their work. Hand-off time does not count.
+* `enqueue(expiresAt:, expiresAfter:)` and the same on `enqueueChain`: a task
+  that has not started by then is cancelled, with a `TaskExpiredException`
+  as its `lastFailure`. `retry` clears an expiry that has passed.
+* `counts({group})`: the number of tasks in each status.
+* `waitFor(id, {timeout})`: waits until a task is completed, failed, or
+  cancelled and returns its record.
+* pubspec: screenshots for pub.dev.
+
 ## 0.5.7
 
 Documentation only; no code changes.

@@ -17,6 +17,7 @@ final class RegisteredTask {
     required this.requires,
     required this.rateLimit,
     required this.deferOn,
+    required this.timeout,
   });
 
   /// Registry key.
@@ -42,6 +43,9 @@ final class RegisteredTask {
 
   /// Optional mapping from handler errors to gates.
   final DeferOnError? deferOn;
+
+  /// Optional limit on how long one attempt's handler may run.
+  final Duration? timeout;
 }
 
 /// Handlers keyed by task type.
@@ -70,9 +74,13 @@ final class TaskRegistry {
     Set<String> requires = const {},
     RateLimit? rateLimit,
     DeferOnError? deferOn,
+    Duration? timeout,
   }) {
     if (type.isEmpty) {
       throw ArgumentError.value(type, 'type', 'Must not be empty');
+    }
+    if (timeout != null && timeout <= Duration.zero) {
+      throw ArgumentError.value(timeout, 'timeout', 'Must be positive');
     }
     if (_byType.containsKey(type)) {
       throw StateError('Task type "$type" is already registered');
@@ -86,6 +94,7 @@ final class TaskRegistry {
       requires: Set<String>.unmodifiable(requires),
       rateLimit: rateLimit,
       deferOn: deferOn,
+      timeout: timeout,
     );
   }
 

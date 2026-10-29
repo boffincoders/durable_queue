@@ -361,4 +361,14 @@ void queueStorageContractTests(QueueStorage Function() create) {
     await storage.update(loaded.copyWith(handOffReference: null));
     expect((await storage.get('a'))?.handOffReference, isNull);
   });
+
+  test('an expiry time persists through updates', () async {
+    final expiry = DateTime.utc(2026, 1, 1, 12);
+    await storage.save(storedTask(id: 'a', expiresAt: expiry));
+    expect((await storage.get('a'))?.expiresAt, expiry);
+    expect((await storage.getNextReady(expiry))?.expiresAt, expiry);
+    final loaded = (await storage.get('a'))!;
+    await storage.update(loaded.copyWith(expiresAt: null));
+    expect((await storage.get('a'))?.expiresAt, isNull);
+  });
 }

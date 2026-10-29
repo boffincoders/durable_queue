@@ -1,3 +1,15 @@
+## 0.2.2
+
+* `registerHttpRequests(successStatusCodes:)`: statuses that complete the
+  task even though Dio rejects them, such as 409 from an API that has
+  already processed a request with the same idempotency key. `onResponse`
+  receives the response.
+* `registerHttpRequests(timeout:)`, passed to `DurableQueue.register`; the
+  request is aborted when an attempt times out.
+* `DioRetryRules.shouldRetry` retries `TaskTimeoutException` when
+  `retryTimeouts` is on (the default).
+* Requires `durable_queue` 0.5.8 or later.
+
 ## 0.2.1
 
 * When a request gets a 429 or 503 with a `Retry-After` header and a per-host

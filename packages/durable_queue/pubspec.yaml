@@ -1,6 +1,6 @@
 name: durable_queue
 description: 'Persistent, retryable task execution for Dart and Flutter: tasks survive crashes and restarts, with retries, priorities, dependencies, offline waiting, and recovery.'
-version: 0.5.7
+version: 0.5.8
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 documentation: https://boffincoders.github.io/durable_queue/
@@ -10,6 +10,11 @@ topics:
   - offline
   - background
   - persistence
+screenshots:
+  - description: Photo uploads that finish after the app is closed, shown by the demo app and its test server.
+    path: screenshots/demo.webp
+  - description: How durable_queue and its packages fit together.
+    path: screenshots/architecture.png
 
 environment:
   sdk: ^3.13.0

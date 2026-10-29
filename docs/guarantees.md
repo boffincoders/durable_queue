@@ -10,6 +10,8 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Attempts are bounded.** A task runs at most `maxAttempts` times. Waiting for a closed gate (for example, no network) or for a rate-limit slot does not use attempts. A task that fails for good stays stored with its last error until you retry, delete, or purge it.
 
+**Timeouts and expiry.** With `register(timeout:)`, an attempt that runs longer is recorded as failed at the timeout and the retry policy decides what follows; its handler's later result is ignored. A task with an expiry is never started after it: when the queue reaches it too late, it is cancelled instead.
+
 **Order.** Among tasks that are ready, higher `priority` starts first, then the oldest. With `maxConcurrentTasks: 1` tasks run one at a time in that order. With more than one slot, tasks can finish in any order; use `dependsOn` or `enqueueChain` when one must wait for another.
 
 **Dependencies.** A task never starts before every task it depends on has completed. If a dependency fails or is cancelled, `onDependencyFailure` decides: cancel (default), fail, or run anyway. A crash between a task finishing and its result being written never leaves its dependents waiting forever.
@@ -33,7 +35,9 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Rate limits across restarts.** Rate limits are kept in memory and start empty after a restart.
 
-**Exact timing.** A scheduled task or retry starts at or after its time, when the queue is running. Times use the device clock.
+**Exact timing.** A scheduled task or retry starts at or after its time, when the queue is running. Times use the device clock. An expired task is cancelled when the queue reaches it, not at the moment it expires.
+
+**Stopping a timed-out handler.** Dart cannot stop a running function. A handler past its timeout keeps running unless it listens for cancellation, so its side effects can still happen.
 
 **Encryption.** Task payloads and error messages are stored as plain data unless you wrap the storage with `durable_queue_encryption`. It encrypts payloads, error messages, deduplication keys, and groups with AES-256-GCM; ids, types, status, times, and idempotency keys stay readable. Either way, do not put secrets such as passwords or tokens in tasks.
 

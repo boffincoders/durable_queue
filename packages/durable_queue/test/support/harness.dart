@@ -69,6 +69,7 @@ final class QueueHarness {
     Set<String> requires = const {},
     RateLimit? rateLimit,
     DeferOnError? deferOn,
+    Duration? timeout,
   }) {
     queue.register<ValueTask>(
       type: type,
@@ -79,6 +80,7 @@ final class QueueHarness {
       requires: requires,
       rateLimit: rateLimit,
       deferOn: deferOn,
+      timeout: timeout,
     );
   }
 

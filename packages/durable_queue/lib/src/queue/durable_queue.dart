@@ -241,8 +241,17 @@ final class DurableQueue {
   /// gate is asked to [QueueGate.recheck]. [deferOn] is consulted before
   /// [retryIf].
   ///
-  /// Throws [ArgumentError] if a gate in [requires] has not been added, or
-  /// if [deferOn] is given without [requires].
+  /// [timeout] limits how long one attempt's handler may run. When it runs
+  /// longer, the attempt fails with [TaskTimeoutException] and [retryIf] and
+  /// the retry policy decide what happens next. Dart cannot stop a running
+  /// function, so the handler keeps running and its result is ignored;
+  /// [TaskContext.whenCancellationRequested] completes so a handler that
+  /// listens for cancellation can stop. Time a transfer spends handed off to the operating system does
+  /// not count.
+  ///
+  /// Throws [ArgumentError] if a gate in [requires] has not been added, if
+  /// [deferOn] is given without [requires], or if [timeout] is not
+  /// positive.
   void register<T extends DurableTask>({
     required String type,
     required TaskDecoder<T> decoder,
@@ -252,6 +261,7 @@ final class DurableQueue {
     Set<String> requires = const {},
     RateLimit? rateLimit,
     DeferOnError? deferOn,
+    Duration? timeout,
   }) {
     _ensureOpen();
     for (final gate in requires) {
@@ -279,6 +289,7 @@ final class DurableQueue {
       requires: requires,
       rateLimit: rateLimit,
       deferOn: deferOn,
+      timeout: timeout,
     );
     if (rateLimit != null) _typeLimiters[type] = RateLimiter(rateLimit);
   }
@@ -374,11 +385,20 @@ final class DurableQueue {
   /// [dependsOn], the task starts when both its dependencies have completed
   /// and its time has come.
   ///
+  /// [expiresAt] or [expiresAfter] (not both) sets when the task stops being
+  /// worth running, for example a "typing" notice or a one-time code. A task
+  /// that has not started by then is cancelled instead of started: it emits
+  /// [TaskCancelled], its [StoredTask.lastFailure] records a
+  /// [TaskExpiredException], and tasks that depend on it settle as for any
+  /// cancellation. A running attempt is not interrupted, but a retry is not
+  /// started after the expiry. [retry] clears an expiry that has passed.
+  ///
   /// Throws [UnknownTaskTypeException] if [task]'s type is not registered,
   /// [TaskNotFoundException] if a [dependsOn] id is not stored, and
   /// [ArgumentError] if the payload is not JSON-encodable, a key, group,
   /// or dependency id is empty, both [runAt] and [delay] are given, or
-  /// [delay] is negative.
+  /// [delay] is negative, both [expiresAt] and [expiresAfter] are given, or
+  /// the expiry is not after both now and the start time.
   Future<String> enqueue(
     DurableTask task, {
     RetryPolicy? retryPolicy,
@@ -391,8 +411,11 @@ final class DurableQueue {
     String? group,
     DateTime? runAt,
     Duration? delay,
+    DateTime? expiresAt,
+    Duration? expiresAfter,
   }) async {
     _ensureOpen();
+    final start = _runAt(runAt, delay);
     final request = _prepare(
       task,
       retryPolicy: retryPolicy,
@@ -402,7 +425,8 @@ final class DurableQueue {
       dependsOn: dependsOn,
       onDependencyFailure: onDependencyFailure,
       group: group,
-      runAt: _runAt(runAt, delay),
+      runAt: start,
+      expiresAt: _expiresAt(expiresAt, expiresAfter, start),
     );
     final events = <QueueEvent>[];
     final id = await _lock.synchronized(() => _store(request, events));
@@ -423,7 +447,8 @@ final class DurableQueue {
   /// cancels the rest of the chain.
   ///
   /// [runAt] or [delay] sets the earliest start of the first task; the
-  /// others follow it as usual.
+  /// others follow it as usual. [expiresAt] or [expiresAfter] applies to
+  /// every task: steps that have not started by then are cancelled.
   ///
   /// Every task is validated before anything is stored, and the chain is
   /// stored in one serialized operation. A storage error part-way through
@@ -442,12 +467,15 @@ final class DurableQueue {
     String? group,
     DateTime? runAt,
     Duration? delay,
+    DateTime? expiresAt,
+    Duration? expiresAfter,
   }) async {
     _ensureOpen();
     if (tasks.isEmpty) {
       throw ArgumentError.value(tasks, 'tasks', 'Must not be empty');
     }
     final firstRunAt = _runAt(runAt, delay);
+    final expiry = _expiresAt(expiresAt, expiresAfter, firstRunAt);
     final requests = [
       for (var i = 0; i < tasks.length; i++)
         _prepare(
@@ -458,6 +486,7 @@ final class DurableQueue {
           group: group,
           dependsOn: i == 0 ? dependsOn : const [],
           runAt: i == 0 ? firstRunAt : null,
+          expiresAt: expiry,
         ),
     ];
     final events = <QueueEvent>[];
@@ -486,6 +515,7 @@ final class DurableQueue {
     required DependencyFailurePolicy onDependencyFailure,
     required String? group,
     DateTime? runAt,
+    DateTime? expiresAt,
   }) {
     if (task.type.isEmpty) {
       throw ArgumentError.value(task.type, 'type', 'Must not be empty');
@@ -513,7 +543,32 @@ final class DurableQueue {
       onDependencyFailure: onDependencyFailure,
       group: group,
       runAt: runAt,
+      expiresAt: expiresAt,
     );
+  }
+
+  /// Turns `enqueue(expiresAt:, expiresAfter:)` into an absolute time, or
+  /// null. [start] is the task's earliest start, if any.
+  DateTime? _expiresAt(
+    DateTime? expiresAt,
+    Duration? expiresAfter,
+    DateTime? start,
+  ) {
+    if (expiresAt != null && expiresAfter != null) {
+      throw ArgumentError('Pass expiresAt or expiresAfter, not both');
+    }
+    final now = _clock.now();
+    final expiry = expiresAfter == null ? expiresAt : now.add(expiresAfter);
+    if (expiry == null) return null;
+    final name = expiresAfter == null ? 'expiresAt' : 'expiresAfter';
+    final value = expiresAfter ?? expiresAt;
+    if (!expiry.isAfter(now)) {
+      throw ArgumentError.value(value, name, 'Must be in the future');
+    }
+    if (start != null && !expiry.isAfter(start)) {
+      throw ArgumentError.value(value, name, 'Must be after the start time');
+    }
+    return expiry;
   }
 
   /// Turns `enqueue(runAt:, delay:)` into an absolute time, or null.
@@ -572,6 +627,7 @@ final class DurableQueue {
         onDependencyFailure: request.onDependencyFailure,
         group: request.group,
         nextAttemptAt: request.runAt,
+        expiresAt: request.expiresAt,
       ),
       verdict,
       now,
@@ -893,6 +949,101 @@ final class DurableQueue {
     });
   }
 
+  /// Returns how many stored tasks are in each status.
+  ///
+  /// Every [TaskStatus] is a key, with zero for statuses no task is in. Pass
+  /// [group] to count only that group's tasks. Useful for a badge such as
+  /// "3 uploads waiting" or a health check.
+  Future<Map<TaskStatus, int>> counts({String? group}) {
+    return _lock.synchronized(() async {
+      final result = {for (final status in TaskStatus.values) status: 0};
+      if (group != null) {
+        for (final task in await _storage.getByGroup(group)) {
+          result[task.status] = result[task.status]! + 1;
+        }
+        return result;
+      }
+      for (final status in TaskStatus.values) {
+        result[status] = (await _storage.getByStatus(status)).length;
+      }
+      return result;
+    });
+  }
+
+  /// Waits until the task [id] is [TaskStatus.completed],
+  /// [TaskStatus.failed], or [TaskStatus.cancelled], and returns its record.
+  ///
+  /// Returns at once when the task has already finished. The queue must be
+  /// running, or be started, for the task to make progress; this method does
+  /// not start it. Check [StoredTask.status] on the result to see how the
+  /// task finished, and [StoredTask.lastFailure] for why it did not
+  /// complete.
+  ///
+  /// Throws [TaskNotFoundException] if [id] is not stored, or is deleted
+  /// while finishing. Throws [TimeoutException] if [timeout] passes first,
+  /// measured on the queue clock, and [StateError] if the queue is closed
+  /// before the task finishes.
+  Future<StoredTask> waitFor(String id, {Duration? timeout}) async {
+    _ensureOpen();
+    final done = Completer<StoredTask>();
+    var finished = false;
+    void finish(StoredTask? task) {
+      if (finished || done.isCompleted) return;
+      if (task == null) {
+        done.completeError(TaskNotFoundException(id));
+      } else if (task.status.isTerminal) {
+        done.complete(task);
+      }
+    }
+
+    final subscription = events.listen(
+      (event) {
+        if (event.taskId != id) return;
+        if (event is! TaskCompleted &&
+            event is! TaskFailed &&
+            event is! TaskCancelled) {
+          return;
+        }
+        getTask(id).then(
+          finish,
+          onError: (Object error, StackTrace trace) {
+            if (!finished && !done.isCompleted) {
+              done.completeError(error, trace);
+            }
+          },
+        );
+      },
+      onDone: () {
+        if (!done.isCompleted) {
+          done.completeError(
+            StateError('The queue was closed before task "$id" finished'),
+          );
+        }
+      },
+    );
+    QueueDelay? limit;
+    if (timeout != null) {
+      limit = _clock.delayUntil(_clock.now().add(timeout));
+      unawaited(
+        limit.future.then((_) {
+          if (!finished && !done.isCompleted) {
+            done.completeError(
+              TimeoutException('Task "$id" did not finish', timeout),
+            );
+          }
+        }),
+      );
+    }
+    try {
+      finish(await getTask(id));
+      return await done.future;
+    } finally {
+      finished = true;
+      await subscription.cancel();
+      limit?.cancel();
+    }
+  }
+
   /// Puts a [TaskStatus.failed] or [TaskStatus.cancelled] task back in the
   /// queue and returns its id.
   ///
@@ -901,9 +1052,11 @@ final class DurableQueue {
   /// to other stored tasks. It becomes [TaskStatus.pending], or
   /// [TaskStatus.waiting] while a dependency is still active, with a fresh
   /// attempt budget: `attempts` resets to zero. Tasks that were cancelled
-  /// because this one failed are not revived; retry them as well. [StoredTask.lastFailure] is kept for reference until the next
-  /// attempt replaces or clears it. Pass [retryPolicy] to replace the stored
-  /// policy.
+  /// because this one failed are not revived; retry them as well.
+  /// [StoredTask.lastFailure] is kept for reference until the next attempt
+  /// replaces or clears it. An expiry that has already passed is cleared, so
+  /// the task can run; a later one is kept. Pass [retryPolicy] to replace
+  /// the stored policy.
   ///
   /// A [TaskEnqueued] event is emitted, and a running queue starts the task
   /// when a slot is free.
@@ -966,6 +1119,7 @@ final class DurableQueue {
           updatedAt: now,
           nextAttemptAt: null,
           cancelRequested: false,
+          expiresAt: _isExpired(task, now) ? null : task.expiresAt,
         ),
       );
       _cancelRequested.remove(task.id);
@@ -1503,6 +1657,11 @@ final class DurableQueue {
             _emit(deferred);
             continue;
           }
+          final expired = next.expired;
+          if (expired != null) {
+            _emitAll(expired);
+            continue;
+          }
           final claimed = next.claimed!;
           if (_runState != QueueRunState.running) {
             await _lock.synchronized(() => _revertClaim(claimed));
@@ -1536,6 +1695,10 @@ final class DurableQueue {
     );
     if (task == null) return null;
     final now = _clock.now();
+    if (_isExpired(task, now)) {
+      _reservations.remove(task.id);
+      return _Claim.expired(await _commit(_expired(task, now), _retryStorage));
+    }
     final deferral = _deferralFor(task, now);
     if (deferral != null) {
       await _retryStorage(
@@ -1568,6 +1731,39 @@ final class DurableQueue {
     );
     await _retryStorage(() => _storage.update(claimed), 'update');
     return _Claim.claimed(claimed);
+  }
+
+  static bool _isExpired(StoredTask task, DateTime now) {
+    final expiresAt = task.expiresAt;
+    return expiresAt != null && !now.isBefore(expiresAt);
+  }
+
+  /// The record and event for [task] reaching its expiry before it started.
+  _Resolved _expired(StoredTask task, DateTime now) {
+    final expiresAt = task.expiresAt!;
+    return _Resolved(
+      task.copyWith(
+        status: TaskStatus.cancelled,
+        updatedAt: now,
+        nextAttemptAt: null,
+        cancelRequested: false,
+        lastFailure: TaskFailure(
+          error: TaskExpiredException(
+            taskId: task.id,
+            expiresAt: expiresAt,
+          ).toString(),
+          stackTrace: null,
+          failedAt: now,
+          attempt: task.attempts,
+        ),
+      ),
+      TaskCancelled(
+        taskId: task.id,
+        taskType: task.type,
+        occurredAt: now,
+        wasRunning: false,
+      ),
+    );
   }
 
   /// Decides whether [task] must wait for a gate or a rate limit. Takes a
@@ -1788,7 +1984,12 @@ final class DurableQueue {
     );
 
     try {
-      await registration.handle(decoded, context);
+      await _withTimeout(
+        claimed,
+        registration.timeout,
+        cancelSignal,
+        () => registration.handle(decoded, context),
+      );
     } on TaskCancelledException catch (error, stackTrace) {
       await _dropHandOff(claimed.id);
       await _markCancelled(claimed, error, stackTrace);
@@ -1810,6 +2011,42 @@ final class DurableQueue {
       return;
     }
     await _settleHandOff(claimed, registration, handOff);
+  }
+
+  /// Runs [handler], failing with [TaskTimeoutException] if it has not
+  /// finished within [timeout]. A handler that outlives its timeout is left
+  /// running, its result ignored, and [cancelSignal] completes so a handler
+  /// that listens for cancellation can stop.
+  Future<void> _withTimeout(
+    StoredTask claimed,
+    Duration? timeout,
+    Completer<void> cancelSignal,
+    Future<void> Function() handler,
+  ) {
+    if (timeout == null) return Future<void>.sync(handler);
+    final result = Completer<void>();
+    final delay = _clock.delayUntil(_clock.now().add(timeout));
+    unawaited(
+      delay.future.then((_) {
+        if (result.isCompleted) return;
+        result.completeError(
+          TaskTimeoutException(taskId: claimed.id, timeout: timeout),
+          StackTrace.current,
+        );
+        if (!cancelSignal.isCompleted) cancelSignal.complete();
+      }),
+    );
+    Future<void>.sync(handler).then(
+      (_) {
+        if (!result.isCompleted) result.complete();
+        delay.cancel();
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!result.isCompleted) result.completeError(error, stackTrace);
+        delay.cancel();
+      },
+    );
+    return result.future;
   }
 
   /// Records a hand-off made while [claimed]'s handler runs, and saves the
@@ -2400,6 +2637,7 @@ final class _EnqueueRequest {
     required this.onDependencyFailure,
     required this.group,
     this.runAt,
+    this.expiresAt,
   });
 
   final String type;
@@ -2412,6 +2650,7 @@ final class _EnqueueRequest {
   final DependencyFailurePolicy onDependencyFailure;
   final String? group;
   final DateTime? runAt;
+  final DateTime? expiresAt;
 
   _EnqueueRequest withDependencies(List<String> dependencies) {
     return _EnqueueRequest(
@@ -2425,6 +2664,7 @@ final class _EnqueueRequest {
       onDependencyFailure: onDependencyFailure,
       group: group,
       runAt: runAt,
+      expiresAt: expiresAt,
     );
   }
 }
@@ -2506,11 +2746,21 @@ final class _Deferral {
 
 /// Result of one [DurableQueue._claimNext] call.
 final class _Claim {
-  const _Claim.claimed(StoredTask this.claimed) : deferred = null;
-  const _Claim.deferred(TaskDeferred this.deferred) : claimed = null;
+  const _Claim.claimed(StoredTask this.claimed)
+    : deferred = null,
+      expired = null;
+  const _Claim.deferred(TaskDeferred this.deferred)
+    : claimed = null,
+      expired = null;
+  const _Claim.expired(List<QueueEvent> this.expired)
+    : claimed = null,
+      deferred = null;
 
   final StoredTask? claimed;
   final TaskDeferred? deferred;
+
+  /// Events from cancelling a task that reached its expiry.
+  final List<QueueEvent>? expired;
 }
 
 /// Counts events while [DurableQueue.drain] runs.

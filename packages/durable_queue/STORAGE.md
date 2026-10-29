@@ -12,6 +12,8 @@ Since 0.3.0 that includes `priority` (int), `dependsOn` (list of task ids), `onD
 
 Since 0.5.4 it also includes `handOffReference` (nullable string), set while a task is handed off to outside work. It must survive restarts: a running task without it is treated as interrupted on the next `start`. Records written earlier have none. Adapters that store the `toJson` record, like `durable_queue_sqlite`, need no change.
 
+Since 0.5.8 it also includes `expiresAt` (nullable timestamp), after which a task that has not started is cancelled. Records written earlier have none and never expire. Adapters that store the `toJson` record need no change.
+
 The payload is whatever the application put in `DurableTask.toJson`. Treat it as sensitive. This package does not encrypt it; `durable_queue_encryption` wraps any adapter and encrypts it before the adapter sees it.
 
 ## Methods
