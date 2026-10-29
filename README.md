@@ -1,6 +1,11 @@
 # durable_queue
 
-Persistent, retryable task execution for Dart and Flutter.
+[![pub package](https://img.shields.io/pub/v/durable_queue.svg)](https://pub.dev/packages/durable_queue)
+[![CI](https://github.com/boffincoders/durable_queue/actions/workflows/ci.yml/badge.svg)](https://github.com/boffincoders/durable_queue/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-d4a012.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-boffincoders.github.io-d4a012.svg)](https://boffincoders.github.io/durable_queue/)
+
+**Persistent, retryable task execution for Dart and Flutter.**
 
 Work such as uploads, messages, and sync is described as data, stored through a pluggable storage interface, and run by a worker that owns retries with backoff, concurrency and rate limits, priorities, dependencies, deduplication, waiting for the network, and crash recovery.
 
@@ -29,6 +34,14 @@ Each integration is a separate package, so the core never forces a database, an 
 ## How the packages fit together
 
 The core engine decides *when* each task runs. Everything else plugs into one of three slots: a **gate** decides whether a task may start now, **storage** decides where tasks live, and a **handler** does the actual work. `durable_queue_flutter` connects the queue to your app's lifecycle and UI, and `durable_queue_workmanager` runs it in background jobs while the app is away.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/media/architecture-dark.png">
+  <img src="docs/media/architecture-light.png" alt="Architecture: your app enqueues tasks into the durable_queue core engine, which durable_queue_flutter and durable_queue_workmanager can start and run. The core has three slots: gates (durable_queue_connectivity), storage (durable_queue_sqlite or _hive, optionally with durable_queue_encryption) and handlers (durable_queue_dio, durable_queue_transfer), each with a built-in default." width="960">
+</picture>
+
+<details>
+<summary>Text version of the diagram</summary>
 
 ```text
                     Your Flutter or Dart app
@@ -63,6 +76,8 @@ The core engine decides *when* each task runs. Everything else plugs into one of
  ManualQueueGate       MemoryQueueStorage  any async function
 ```
 
+</details>
+
 Every package is optional. Start with the core and its built-in pieces, then swap in a package for the slot you need: SQLite or Hive when tasks must survive restarts, encryption when tasks hold personal data, the connectivity gate when work needs the network, Dio for HTTP, transfers for uploads and downloads that must finish after the app is closed. Your own gates, storage adapters, and handlers fit the same slots.
 
 ## See it work
@@ -80,7 +95,7 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.4
+  durable_queue: ^0.5.7
 ```
 
 The [documentation site](https://boffincoders.github.io/durable_queue/) and the [`durable_queue` README](packages/durable_queue/README.md) have the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).
@@ -95,12 +110,16 @@ packages/
   durable_queue_transfer/       background uploads and downloads (published to pub.dev; outside the workspace)
   durable_queue_workmanager/    Workmanager background jobs (published to pub.dev; outside the workspace)
   durable_queue_dio/            Dio integration (published to pub.dev)
+  durable_queue_encryption/     encryption at rest (published to pub.dev)
+  durable_queue_hive/           Hive storage (published to pub.dev)
   durable_queue_sqlite/         SQLite storage (published to pub.dev)
   durable_queue_test_support/   shared test helpers (not published)
-docs/                           guarantees and cookbook
+benchmark/                      benchmarks behind docs/benchmarks.md
+docs/                           guarantees, cookbook, benchmarks, and media
 examples/
   cookbook/                     the cookbook's recipes, checked by CI (not published)
   durable_queue_demo/           demo app and kill tests (not published)
+website/                        the documentation site (built by website/build.dart)
 pubspec.yaml                    Dart pub workspace root (not published)
 CONTRIBUTING.md                 how to contribute
 ```
@@ -112,3 +131,11 @@ CONTRIBUTING.md                 how to contribute
 * Code and adapters: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 Licensed under the [MIT license](LICENSE).
+
+---
+
+<p>
+  <a href="https://boffincoders.com/?utm_source=github&utm_medium=readme&utm_campaign=durable_queue"><img src="website/static/brand/bc-gold.png" alt="Boffin Coders" width="36" height="36" align="left"></a>
+  Built and maintained by <a href="https://boffincoders.com/?utm_source=github&utm_medium=readme&utm_campaign=durable_queue">Boffin Coders</a>.<br>
+  More open source: <a href="https://boffincoders.github.io/fundamental-analysis/">fundamental-analysis</a> · <a href="https://boffincoders.github.io/akamai-netstorageapi-typescript/">ts-netstorageapi-akamai</a> · <a href="https://github.com/boffincoders">all projects</a>
+</p>

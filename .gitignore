@@ -40,3 +40,6 @@ doc/
 
 # Built documentation site (website/build.dart)
 website/dist/
+
+# The docs site script is hand-written, not generated.
+!website/static/site.js

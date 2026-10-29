@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 712" role="img" aria-labelledby="dq-arch-title dq-arch-desc">
+<title id="dq-arch-title">How the durable_queue packages fit together</title>
+<desc id="dq-arch-desc">Your app enqueues tasks into the durable_queue core engine, which durable_queue_flutter and durable_queue_workmanager can start and run. The core has three slots: gates (filled by durable_queue_connectivity), storage (durable_queue_sqlite or durable_queue_hive, optionally wrapped by durable_queue_encryption) and handlers (durable_queue_dio and durable_queue_transfer). Each slot has a built-in default.</desc>
+<defs>
+<marker id="dq-arch-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="dg-head"/></marker>
+<marker id="dq-arch-arrow-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="dg-head-accent"/></marker>
+</defs>
+<rect class="dg-bg" x="0.5" y="0.5" width="959" height="711" rx="12"/>
+
+<!-- Header: eyebrow left, maker right -->
+<text class="dg-m dg-gold" x="40" y="44" font-size="11" letter-spacing="1.5">DURABLE_QUEUE · ARCHITECTURE</text>
+<image href="{{root}}brand/bc-gold.png" x="770" y="24" width="28" height="28"/>
+<text class="dg-n dg-muted" x="806" y="43" font-size="13">by Boffin Coders</text>
+
+<!-- Core engine (container, drawn before the arrows that end inside it) -->
+<rect class="dg-zone" x="40" y="272" width="880" height="168" rx="10" stroke-width="1.5"/>
+<text class="dg-h dg-ink" x="480" y="302" font-size="17" text-anchor="middle">durable_queue · core engine</text>
+<text class="dg-m dg-muted" x="480" y="323" font-size="11.5" text-anchor="middle">retries · priorities · dependencies · rate limits · events</text>
+
+<!-- Arrows -->
+<line class="dg-line-accent" x1="480" y1="136" x2="480" y2="270" stroke-width="1.6" marker-end="url(#dq-arch-arrow-accent)"/>
+<path class="dg-line" d="M320,204 H392 Q400,204 400,212 V270" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+<path class="dg-line" d="M640,204 H568 Q560,204 560,212 V270" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+<line class="dg-line" x1="176" y1="488" x2="176" y2="422" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+<line class="dg-line" x1="464" y1="488" x2="464" y2="422" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+<line class="dg-line" x1="752" y1="488" x2="752" y2="422" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+<path class="dg-line" d="M576,608 H584 Q592,608 592,600 V422" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+<path class="dg-line" d="M864,608 H872 Q880,608 880,600 V422" stroke-width="1.2" marker-end="url(#dq-arch-arrow)"/>
+
+<!-- Your app -->
+<rect class="dg-node" x="320" y="80" width="320" height="56" rx="8"/>
+<text class="dg-n dg-ink" x="480" y="104" font-size="15" text-anchor="middle">Your Flutter or Dart app</text>
+<text class="dg-t dg-muted" x="480" y="124" font-size="12" text-anchor="middle">enqueue tasks · show status · react to results</text>
+
+<!-- Lifecycle packages -->
+<rect class="dg-node" x="40" y="168" width="280" height="72" rx="8"/>
+<text class="dg-m dg-ink" x="56" y="190" font-size="12.5">durable_queue_flutter</text>
+<text class="dg-t dg-muted" x="56" y="210" font-size="12">starts the queue with the app, pauses it</text>
+<text class="dg-t dg-muted" x="56" y="226" font-size="12">in the background, rebuilds widgets</text>
+
+<rect class="dg-node" x="640" y="168" width="280" height="72" rx="8"/>
+<text class="dg-m dg-ink" x="656" y="190" font-size="12.5">durable_queue_workmanager</text>
+<text class="dg-t dg-muted" x="656" y="210" font-size="12">runs the queue in background jobs</text>
+<text class="dg-t dg-muted" x="656" y="226" font-size="12">while the app is away</text>
+
+<!-- Slots -->
+<rect class="dg-slot" x="64" y="340" width="256" height="80" rx="8"/>
+<text class="dg-n dg-ink" x="80" y="364" font-size="14">Gates</text>
+<text class="dg-t dg-muted" x="80" y="384" font-size="12">may a task start?</text>
+<text class="dg-m dg-soft" x="80" y="406" font-size="11">built in: ManualQueueGate</text>
+
+<rect class="dg-slot" x="352" y="340" width="256" height="80" rx="8"/>
+<text class="dg-n dg-ink" x="368" y="364" font-size="14">Storage</text>
+<text class="dg-t dg-muted" x="368" y="384" font-size="12">where tasks live</text>
+<text class="dg-m dg-soft" x="368" y="406" font-size="11">built in: MemoryQueueStorage</text>
+
+<rect class="dg-slot" x="640" y="340" width="256" height="80" rx="8"/>
+<text class="dg-n dg-ink" x="656" y="364" font-size="14">Handlers</text>
+<text class="dg-t dg-muted" x="656" y="384" font-size="12">what a task does</text>
+<text class="dg-m dg-soft" x="656" y="406" font-size="11">built in: any async function</text>
+
+<!-- Packages that fill the slots -->
+<rect class="dg-node" x="64" y="488" width="224" height="64" rx="8"/>
+<text class="dg-m dg-ink" x="80" y="514" font-size="12">durable_queue_connectivity</text>
+<text class="dg-t dg-muted" x="80" y="534" font-size="12">waits while offline</text>
+
+<rect class="dg-node" x="352" y="488" width="224" height="64" rx="8"/>
+<text class="dg-m dg-ink" x="368" y="514" font-size="12">durable_queue_sqlite, _hive</text>
+<text class="dg-t dg-muted" x="368" y="534" font-size="12">survive restarts</text>
+
+<rect class="dg-node" x="352" y="576" width="224" height="64" rx="8"/>
+<text class="dg-m dg-ink" x="368" y="602" font-size="12">durable_queue_encryption</text>
+<text class="dg-t dg-muted" x="368" y="622" font-size="12">encrypts what is stored</text>
+
+<rect class="dg-node" x="640" y="488" width="224" height="64" rx="8"/>
+<text class="dg-m dg-ink" x="656" y="514" font-size="12">durable_queue_dio</text>
+<text class="dg-t dg-muted" x="656" y="534" font-size="12">HTTP, retry rules, Retry-After</text>
+
+<rect class="dg-node" x="640" y="576" width="224" height="64" rx="8"/>
+<text class="dg-m dg-ink" x="656" y="602" font-size="12">durable_queue_transfer</text>
+<text class="dg-t dg-muted" x="656" y="622" font-size="12">background uploads, downloads</text>
+
+<text class="dg-t dg-soft" x="480" y="680" font-size="12.5" text-anchor="middle">Every package is optional. Start with the built-in pieces, then swap in a package for the slot you need.</text>
+</svg>
