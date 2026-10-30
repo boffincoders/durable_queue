@@ -20,6 +20,9 @@ final class FakeDownloader implements FileDownloader {
   var rescheduleCalls = 0;
   final native = <String, Task>{};
   final cancelled = <String>[];
+  final pauses = <String>[];
+  final resumes = <String>[];
+  var resumeResult = true;
   final unregistered = <String>[];
   final fakeDatabase = FakeDatabase();
 
@@ -78,6 +81,29 @@ final class FakeDownloader implements FileDownloader {
   @override
   Future<bool> cancelTaskWithId(String taskId) async {
     cancelled.add(taskId);
+    return true;
+  }
+
+  @override
+  Future<bool> pause(DownloadTask task) async {
+    pauses.add(task.taskId);
+    if (!task.allowPause) return false;
+    native.remove(task.taskId);
+    fakeDatabase.records[task.taskId] = TaskRecord(
+      task,
+      TaskStatus.paused,
+      0.5,
+      100,
+    );
+    return true;
+  }
+
+  @override
+  Future<bool> resume(DownloadTask task) async {
+    resumes.add(task.taskId);
+    fakeDatabase.records.remove(task.taskId);
+    if (!resumeResult) return false;
+    native[task.taskId] = task;
     return true;
   }
 

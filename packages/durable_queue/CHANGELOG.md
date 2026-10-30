@@ -1,3 +1,24 @@
+## 0.5.9
+
+New features, no breaking changes. Storage adapters must persist the new
+`StoredTask.held` and `StoredTask.releaseAt` fields (see STORAGE.md);
+adapters that store the `toJson` record, like `durable_queue_sqlite` and
+`durable_queue_hive`, need no change.
+
+* `hold(id)` and `release(id)`: pause and resume one task.
+  * A task that has not started does not start while held; its start or
+    retry time is kept.
+  * A running task is asked to stop; it goes back to the queue held, and the
+    interrupted attempt does not count.
+  * A handed-off task stays running, and the outside work is told to pause.
+* `holdChanges`: a stream of `TaskHoldChanged`, reported when a task is held,
+  released, or stops running because of a hold. It is separate from
+  `events`, so switches over `QueueEvent` are unaffected.
+* `StoredTask.held`, `StoredTask.releaseAt`, and
+  `StoredTask.heldNextAttemptAt`.
+* A running task that was held when the app stopped comes back held on the
+  next `start`, without counting the attempt.
+
 ## 0.5.8
 
 New features, no breaking changes. Storage adapters must persist the new

@@ -12,6 +12,8 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Timeouts and expiry.** With `register(timeout:)`, an attempt that runs longer is recorded as failed at the timeout and the retry policy decides what follows; its handler's later result is ignored. A task with an expiry is never started after it: when the queue reaches it too late, it is cancelled instead.
 
+**Holds.** A held task that has not started does not start until it is released, across restarts. A running task that is held goes back to the queue held when its handler stops, without counting the attempt. A handler that finishes anyway completes the task.
+
 **Order.** Among tasks that are ready, higher `priority` starts first, then the oldest. With `maxConcurrentTasks: 1` tasks run one at a time in that order. With more than one slot, tasks can finish in any order; use `dependsOn` or `enqueueChain` when one must wait for another.
 
 **Dependencies.** A task never starts before every task it depends on has completed. If a dependency fails or is cancelled, `onDependencyFailure` decides: cancel (default), fail, or run anyway. A crash between a task finishing and its result being written never leaves its dependents waiting forever.

@@ -11,6 +11,9 @@ void main() {
     expect(TransferIds.attempt('dq-10-x'), 10);
     expect(TransferIds.attempt('dq-2-abc-123'), 2);
     expect(TransferIds.attempt('other'), isNull);
+    expect(TransferIds.build('abc-123', 2, 3), 'dq-2.3-abc-123');
+    expect(TransferIds.queueTaskId('dq-2.3-abc-123'), 'abc-123');
+    expect(TransferIds.attempt('dq-2.3-abc-123'), 2);
     for (final other in [
       'abc',
       'dq-',
@@ -18,6 +21,9 @@ void main() {
       'dq-2-',
       'dq--x',
       'dq-a-x',
+      'dq-1.-x',
+      'dq-.1-x',
+      'dq-1.a-x',
       'xdq-1-x',
     ]) {
       expect(TransferIds.queueTaskId(other), isNull, reason: other);

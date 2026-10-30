@@ -371,4 +371,28 @@ void queueStorageContractTests(QueueStorage Function() create) {
     await storage.update(loaded.copyWith(expiresAt: null));
     expect((await storage.get('a'))?.expiresAt, isNull);
   });
+
+  test('a held task persists and is never ready', () async {
+    final releaseAt = DateTime.utc(2026, 1, 1, 12);
+    await storage.save(
+      storedTask(id: 'a').copyWith(
+        held: true,
+        releaseAt: releaseAt,
+        nextAttemptAt: StoredTask.heldNextAttemptAt,
+      ),
+    );
+    final loaded = (await storage.get('a'))!;
+    expect(loaded.held, isTrue);
+    expect(loaded.releaseAt, releaseAt);
+    expect(loaded.nextAttemptAt, StoredTask.heldNextAttemptAt);
+    expect(await storage.getNextReady(DateTime.utc(3000)), isNull);
+    expect(await storage.getNextWakeAt(), StoredTask.heldNextAttemptAt);
+    await storage.update(
+      loaded.copyWith(held: false, releaseAt: null, nextAttemptAt: null),
+    );
+    final released = (await storage.get('a'))!;
+    expect(released.held, isFalse);
+    expect(released.releaseAt, isNull);
+    expect((await storage.getNextReady(DateTime.utc(2026)))?.id, 'a');
+  });
 }

@@ -132,6 +132,31 @@ void main() {
     });
   });
 
+  group('holds', () {
+    test('watchTask and watchGroup update on hold and release', () async {
+      final id = await queue.enqueue(Note('a'), group: 'g');
+      final task = <bool?>[];
+      final group = <List<bool>>[];
+      final subA = queue.watchTask(id).listen((t) => task.add(t?.held));
+      final subB = queue
+          .watchGroup('g')
+          .listen((tasks) => group.add([for (final t in tasks) t.held]));
+      await pumpEventQueue();
+      await queue.hold(id);
+      await pumpEventQueue();
+      await queue.release(id);
+      await pumpEventQueue();
+      expect(task, [false, true, false]);
+      expect(group, [
+        [false],
+        [true],
+        [false],
+      ]);
+      await subA.cancel();
+      await subB.cancel();
+    });
+  });
+
   group('watchGroup', () {
     test('emits the group now and when tasks join or change', () async {
       await queue.enqueue(Note('a'), group: 'album');

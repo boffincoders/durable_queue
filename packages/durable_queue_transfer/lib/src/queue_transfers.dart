@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:background_downloader/background_downloader.dart'
     show
+        DownloadTask,
         FileDownloader,
         Task,
         TaskException,
@@ -14,10 +15,12 @@ import 'package:durable_queue/durable_queue.dart'
         QueueClock,
         QueueDelay,
         QueueEvent,
+        StoredTask,
         SystemQueueClock,
         TaskCancelled,
         TaskCancelledException,
-        TaskContext;
+        TaskContext,
+        TaskHoldChanged;
 import 'package:durable_queue/durable_queue.dart' as dq show TaskStatus;
 
 import 'transfer_errors.dart';
@@ -65,6 +68,12 @@ final class TransferResult {
 ///
 /// Call [attach] once per app launch, in the app's main isolate, so results
 /// that arrived while the app was not running are applied.
+///
+/// `queue.hold(id)` pauses a transfer and `queue.release(id)` resumes it.
+/// A download created with `allowPause: true` is paused by
+/// background_downloader and continues where it stopped, when the server
+/// supports it. Any other transfer is cancelled, its queue task goes back to
+/// the queue held, and it starts again from the beginning once released.
 ///
 /// ```dart
 /// final transfers = QueueTransfers(queue);
@@ -144,6 +153,7 @@ final class QueueTransfers {
   final FileDownloader? _downloader;
   final QueueClock _clock;
   StreamSubscription<QueueEvent>? _events;
+  StreamSubscription<TaskHoldChanged>? _holds;
   QueueDelay? _settle;
   var _attached = false;
   var _disposed = false;
@@ -160,7 +170,7 @@ final class QueueTransfers {
   /// Throws [TransferEnqueueException] if background_downloader does not
   /// enqueue it, which the handler passes on as a normal failure.
   Future<String> start(TaskContext context, Task transfer) async {
-    final id = TransferIds.build(context.taskId, context.attempt);
+    final id = await _freshId(context);
     final task = transfer.copyWith(taskId: id, group: group);
     // Saved before the transfer starts, so a crash in between is reconciled
     // as a lost transfer rather than starting a second one.
@@ -169,19 +179,31 @@ final class QueueTransfers {
     return id;
   }
 
+  /// The transfer id for [context]'s attempt. An attempt that starts again
+  /// after a hold stopped its transfer gets a new id, so late updates of the
+  /// stopped transfer cannot be mistaken for the new one.
+  Future<String> _freshId(TaskContext context) async {
+    for (var restart = 0; ; restart++) {
+      final id = TransferIds.build(context.taskId, context.attempt, restart);
+      if (await _files.database.recordForId(id) == null) return id;
+    }
+  }
+
   /// Starts applying transfer results to the queue: registers for
   /// background_downloader updates of [group], turns on its record keeping
   /// for [group], and asks for updates stored while the app was not running.
   /// After [settleDelay] it reschedules killed transfers (see
   /// [rescheduleKilled]) and runs [reconcile].
   ///
-  /// Also cancels a transfer when its queue task is cancelled. Calling it
-  /// again does nothing.
+  /// Also cancels a transfer when its queue task is cancelled, and pauses or
+  /// resumes it when its queue task is held or released (see
+  /// `DurableQueue.hold`). Calling it again does nothing.
   Future<void> attach() async {
     if (_attached || _disposed) return;
     _attached = true;
     _files.registerCallbacks(group: group, taskStatusCallback: _onStatus);
     _events = queue.events.listen(_onQueueEvent);
+    _holds = queue.holdChanges.listen(_onHoldChange);
     await _files.trackTasksInGroup(group);
     await _files.resumeFromBackground();
     final settle = _settle = _clock.delayUntil(_clock.now().add(settleDelay));
@@ -198,7 +220,9 @@ final class QueueTransfers {
 
   /// Applies the outcome of every handed-off transfer that background_downloader
   /// recorded as finished, and fails hand-offs whose transfer it does not
-  /// know (see [lostAfter]). Transfers still running are left alone.
+  /// know (see [lostAfter]). Pauses transfers of held tasks and resumes
+  /// paused transfers of released ones, in case the app stopped before it
+  /// could. Other transfers still running are left alone.
   ///
   /// [attach] runs it once. Call it again, for example when the app returns
   /// to the foreground, if you like; it is safe to repeat.
@@ -211,11 +235,17 @@ final class QueueTransfers {
       try {
         final record = await _files.database.recordForId(reference);
         if (record != null) {
-          // _apply leaves unfinished transfers alone.
-          await _apply(record.task, record.status, record.exception, null);
+          if (record.status.isFinalState) {
+            await _apply(record.task, record.status, record.exception, null);
+          } else {
+            await _syncHold(task);
+          }
           continue;
         }
-        if (await _files.taskForId(reference) != null) continue;
+        if (await _files.taskForId(reference) != null) {
+          await _syncHold(task);
+          continue;
+        }
         if (_clock.now().difference(task.updatedAt) < lostAfter) continue;
         await queue.failHandOff(
           task.id,
@@ -235,6 +265,7 @@ final class QueueTransfers {
     _disposed = true;
     _settle?.cancel();
     await _events?.cancel();
+    await _holds?.cancel();
     if (_attached) {
       _files.unregisterCallbacks(group: group, callback: _onStatus);
     }
@@ -344,6 +375,52 @@ final class QueueTransfers {
     final reference = task?.handOffReference;
     if (reference == null || TransferIds.queueTaskId(reference) != id) return;
     await _files.cancelTaskWithId(reference);
+  }
+
+  void _onHoldChange(TaskHoldChanged change) {
+    if (_disposed || !change.isHandedOff) return;
+    unawaited(
+      queue
+          .getTask(change.taskId)
+          .then((task) async {
+            if (task != null) await _syncHold(task);
+          })
+          .catchError(_report),
+    );
+  }
+
+  /// Pauses the transfer of a held, handed-off [task], or resumes the paused
+  /// transfer of a released one.
+  Future<void> _syncHold(StoredTask task) async {
+    final reference = task.handOffReference;
+    if (!task.isHandedOff || reference == null) return;
+    if (TransferIds.queueTaskId(reference) != task.id) return;
+    final record = await _files.database.recordForId(reference);
+    final paused = record?.status == TaskStatus.paused;
+    final transfer = record?.task ?? await _files.taskForId(reference);
+    if (task.held) {
+      if (paused) return;
+      if (transfer is DownloadTask && await _files.pause(transfer)) return;
+      // Not pausable: stop it. The queue task goes back held and starts a
+      // new transfer once released.
+      await _files.cancelTaskWithId(reference);
+      await queue.failHandOff(
+        task.id,
+        const TaskCancelledException(),
+        reference: reference,
+      );
+      return;
+    }
+    if (!paused || transfer is! DownloadTask) return;
+    if (await _files.resume(transfer)) return;
+    // Nothing to resume from: download it again.
+    if (!await _files.enqueue(transfer)) {
+      await queue.failHandOff(
+        task.id,
+        TransferEnqueueException(reference),
+        reference: reference,
+      );
+    }
   }
 
   void _report(Object error, StackTrace stackTrace) {

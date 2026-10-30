@@ -10,12 +10,12 @@ environment:
 dependencies:
   background_downloader: ^9.6.4
   dio: ^5.11.1
-  durable_queue: ^0.5.4
+  durable_queue: ^0.5.9
   durable_queue_connectivity: ^0.1.0
   durable_queue_dio: ^0.2.1
-  durable_queue_flutter: ^0.1.1
+  durable_queue_flutter: ^0.1.2
   durable_queue_sqlite: ^0.2.2
-  durable_queue_transfer: ^0.1.0
+  durable_queue_transfer: ^0.2.0
   durable_queue_workmanager: ^0.1.0
   flutter:
     sdk: flutter

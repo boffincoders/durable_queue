@@ -1,3 +1,9 @@
+## 0.1.2
+
+* `watchTask`, `watchGroup`, `QueueTaskBuilder`, and `QueueGroupBuilder` also
+  update when a task is held or released (`DurableQueue.holdChanges`).
+* Requires `durable_queue` 0.5.9 or later.
+
 ## 0.1.1
 
 * `DurableQueueScope(runQueue: false)`: the scope only provides the queue

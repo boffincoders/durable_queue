@@ -101,6 +101,27 @@ Call it once per launch, in the app's main isolate, before or after `queue.start
 
 So "it will be done" holds as long as the app is eventually opened again and the retry budget is not used up. A force-quit can delay a transfer until the next launch; it does not lose the task.
 
+## Pause and resume
+
+Let the user pause one transfer with the queue's `hold` and `release`:
+
+```dart
+await queue.hold(uploadId);    // pause
+await queue.release(uploadId); // resume
+```
+
+* A download created with `allowPause: true` is paused by `background_downloader` and continues where it stopped, if the server supports range requests. If it cannot continue, it downloads again from the start.
+* Any other transfer, including every upload, is cancelled. The queue task goes back to the queue held, and a new transfer starts from the beginning after `release`. The interrupted attempt does not count.
+
+```dart
+handler: (task, context) => transfers.start(
+  context,
+  DownloadTask(url: task.url, filename: task.fileName, allowPause: true),
+),
+```
+
+`attach` must have been called. A hold made while the app could not apply it, for example just before it was closed, is applied by `reconcile` at the next launch. Show held tasks as paused with `StoredTask.held`.
+
 ## Long transfers
 
 * **iOS:** a background transfer must finish within the system's resource timeout, 4 hours by default (see `background_downloader`'s configuration).

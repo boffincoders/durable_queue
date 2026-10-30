@@ -7,6 +7,7 @@ library;
 export 'src/clock/queue_clock.dart';
 export 'src/errors.dart';
 export 'src/events/queue_event.dart';
+export 'src/events/task_hold_changed.dart';
 export 'src/gates/queue_gate.dart';
 export 'src/limits/rate_limit.dart';
 export 'src/queue/drain_result.dart';

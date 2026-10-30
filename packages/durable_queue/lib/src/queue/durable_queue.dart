@@ -6,6 +6,7 @@ import 'dart:math';
 import '../clock/queue_clock.dart';
 import '../errors.dart';
 import '../events/queue_event.dart';
+import '../events/task_hold_changed.dart';
 import '../gates/queue_gate.dart';
 import '../internal/async_lock.dart';
 import '../internal/rate_limiter.dart';
@@ -186,6 +187,12 @@ final class DurableQueue {
   final StreamController<QueueStorageFailure> _storageErrors =
       StreamController<QueueStorageFailure>.broadcast();
   final Set<String> _cancelRequested = {};
+
+  /// Running tasks whose handler was asked to stop because of a hold. They
+  /// go back to the queue when the handler stops, even if released since.
+  final Set<String> _holdInterrupted = {};
+  final StreamController<TaskHoldChanged> _holdChanges =
+      StreamController<TaskHoldChanged>.broadcast();
   final Map<String, Completer<void>> _cancelSignals = {};
 
   /// Hand-offs made by handlers that have not returned yet, by task id.
@@ -211,6 +218,13 @@ final class DurableQueue {
 
   /// Lifecycle events. This is a broadcast stream and does not replay.
   Stream<QueueEvent> get events => _events.stream;
+
+  /// Reports tasks being held, released, or stopped because of a hold (see
+  /// [hold]). Broadcast; it does not replay earlier changes.
+  ///
+  /// Hold changes are not [QueueEvent]s, so switches over [events] are
+  /// unaffected. Code that shows tasks listens to both.
+  Stream<TaskHoldChanged> get holdChanges => _holdChanges.stream;
 
   /// Worker storage failures, reported before each automatic retry.
   ///
@@ -655,8 +669,10 @@ final class DurableQueue {
   /// attempt budget is spent, the task fails with [TaskInterruptedException].
   /// Otherwise it is scheduled using its retry policy. A running task whose
   /// cancellation was already requested is marked cancelled and is not
-  /// retried. Tasks handed off with [TaskContext.handOff] are not
-  /// interrupted: they keep running outside the queue and are left alone.
+  /// retried. A running task that was held (see [hold]) goes back to the
+  /// queue held, and that attempt does not count. Tasks handed off with
+  /// [TaskContext.handOff] are not interrupted: they keep running outside
+  /// the queue and are left alone.
   ///
   /// A recovered task that fails or is cancelled also settles the tasks
   /// waiting on it.
@@ -854,6 +870,155 @@ final class DurableQueue {
         return false;
     }
   }
+
+  /// Holds task [id] until [release] is called, for example when a user
+  /// pauses one upload. Returns false, and changes nothing, if the task is
+  /// already held, finished, or being cancelled.
+  ///
+  /// * `pending`, `waiting`, and `retryScheduled` keep their status but do
+  ///   not start. The start or retry time is kept for [release]; tasks that
+  ///   depend on this one keep waiting.
+  /// * `running` is asked to stop: [TaskContext.isCancellationRequested]
+  ///   becomes true and [TaskContext.whenCancellationRequested] completes.
+  ///   When the handler then throws, including [TaskCancelledException], the
+  ///   task goes back to the queue held, and the interrupted attempt does
+  ///   not count. If the handler returns normally, the task completes.
+  /// * A task handed off with [TaskContext.handOff] stays running. Whoever
+  ///   runs the outside work is told on [holdChanges] and pauses it, or
+  ///   stops it with [failHandOff], which puts the task back held; until
+  ///   then the work continues and its outcome still applies.
+  ///   `durable_queue_transfer` does this for uploads and downloads.
+  ///
+  /// Holding does not stop the task from expiring (see
+  /// `enqueue(expiresAt:)`): a task released after its expiry is cancelled.
+  /// A held task holds its deduplication key and counts under its status in
+  /// [counts]. [cancel] still cancels it.
+  ///
+  /// Throws [TaskNotFoundException] when [id] is not stored.
+  Future<bool> hold(String id) async {
+    _ensureOpen();
+    final change = await _lock.synchronized(() async {
+      final task = await _storage.get(id);
+      if (task == null) throw TaskNotFoundException(id);
+      if (task.held || task.status.isTerminal || task.cancelRequested) {
+        return null;
+      }
+      if (_cancelRequested.contains(id)) return null;
+      final now = _clock.now();
+      if (task.status == TaskStatus.running) {
+        final held = task.copyWith(held: true, updatedAt: now);
+        await _storage.update(held);
+        if (_cancelSignals.containsKey(id) && !task.isHandedOff) {
+          _holdInterrupted.add(id);
+          _signalCancel(id);
+        }
+        return held;
+      }
+      _reservations.remove(id);
+      for (final gate in _gates.values) {
+        gate.deferred.remove(id);
+      }
+      final held = task.copyWith(
+        held: true,
+        releaseAt: task.nextAttemptAt,
+        nextAttemptAt: StoredTask.heldNextAttemptAt,
+        updatedAt: now,
+      );
+      await _storage.update(held);
+      return held;
+    });
+    if (change == null) return false;
+    _emitHold(change);
+    return true;
+  }
+
+  /// Releases task [id] held by [hold]. Returns false, and changes nothing,
+  /// if it is not held.
+  ///
+  /// A task that was waiting to start may start again at its original start
+  /// or retry time, or at once if that has passed. A running task whose
+  /// handler was already asked to stop still goes back to the queue when it
+  /// stops, without counting the attempt, and starts again. A handed-off
+  /// task is reported on [holdChanges] so the outside work can resume.
+  ///
+  /// Throws [TaskNotFoundException] when [id] is not stored.
+  Future<bool> release(String id) async {
+    _ensureOpen();
+    final change = await _lock.synchronized(() async {
+      final task = await _storage.get(id);
+      if (task == null) throw TaskNotFoundException(id);
+      if (!task.held) return null;
+      final now = _clock.now();
+      final released = task.status == TaskStatus.running
+          ? task.copyWith(held: false, releaseAt: null, updatedAt: now)
+          : task.copyWith(
+              held: false,
+              nextAttemptAt: task.releaseAt,
+              releaseAt: null,
+              updatedAt: now,
+            );
+      await _storage.update(released);
+      return released;
+    });
+    if (change == null) return false;
+    _emitHold(change);
+    if (_runState == QueueRunState.running) unawaited(_pump());
+    return true;
+  }
+
+  /// Puts a running task back in the queue when it stopped because of a
+  /// hold. The attempt does not count. Returns false when no hold applies,
+  /// or when the task is being cancelled.
+  Future<bool> _requeueForHold(StoredTask claimed) async {
+    if (_cancelRequested.contains(claimed.id)) return false;
+    final requeued = await _lock.synchronized(() async {
+      final current = await _retryStorage(
+        () => _storage.get(claimed.id),
+        'get',
+      );
+      if (current == null ||
+          current.status != TaskStatus.running ||
+          current.attempts != claimed.attempts ||
+          current.cancelRequested) {
+        return null;
+      }
+      if (!current.held && !_holdInterrupted.contains(current.id)) return null;
+      final now = _clock.now();
+      final attempts = current.attempts - 1;
+      final next = current.copyWith(
+        status: attempts > 0 ? TaskStatus.retryScheduled : TaskStatus.pending,
+        attempts: attempts,
+        updatedAt: now,
+        nextAttemptAt: current.held ? StoredTask.heldNextAttemptAt : now,
+        releaseAt: null,
+        handOffReference: null,
+      );
+      await _retryStorage(() => _storage.update(next), 'update');
+      return next;
+    });
+    if (requeued == null) return false;
+    _holdInterrupted.remove(claimed.id);
+    _emitHold(requeued);
+    return true;
+  }
+
+  void _emitHold(StoredTask task) {
+    if (_holdChanges.isClosed) return;
+    _holdChanges.add(
+      TaskHoldChanged(
+        taskId: task.id,
+        taskType: task.type,
+        occurredAt: task.updatedAt,
+        held: task.held,
+        status: task.status,
+        isHandedOff: task.isHandedOff,
+      ),
+    );
+  }
+
+  /// Whether a wake-up time only comes from held tasks.
+  static bool _isHeldTime(DateTime time) =>
+      !time.isBefore(StoredTask.heldNextAttemptAt);
 
   /// Completes a task that was handed off with [TaskContext.handOff], when
   /// the outside work succeeded. Tasks waiting on it are released.
@@ -1120,6 +1285,8 @@ final class DurableQueue {
           nextAttemptAt: null,
           cancelRequested: false,
           expiresAt: _isExpired(task, now) ? null : task.expiresAt,
+          held: false,
+          releaseAt: null,
         ),
       );
       _cancelRequested.remove(task.id);
@@ -1282,7 +1449,10 @@ final class DurableQueue {
       await stop();
       _drainStats = null;
     }
-    final nextWakeAt = await _lock.synchronized(_storage.getNextWakeAt);
+    final storedWake = await _lock.synchronized(_storage.getNextWakeAt);
+    final nextWakeAt = storedWake == null || _isHeldTime(storedWake)
+        ? null
+        : storedWake;
     return DrainResult(
       reason: timedOut ? DrainStopReason.timeLimit : DrainStopReason.idle,
       started: stats.started,
@@ -1309,7 +1479,7 @@ final class DurableQueue {
         () => _storage.getNextWakeAt(),
         'getNextWakeAt',
       );
-      if (wake == null) return true;
+      if (wake == null || _isHeldTime(wake)) return true;
       return deadline != null && wake.isAfter(deadline);
     });
   }
@@ -1402,6 +1572,7 @@ final class DurableQueue {
       await entry.subscription?.cancel();
     }
     await _events.close();
+    await _holdChanges.close();
     await _storageErrors.close();
   }
 
@@ -1514,10 +1685,18 @@ final class DurableQueue {
         ? await _planDependents(root.task.id, root.task.status, io)
         : const <_Resolved>[];
     for (final step in cascade.reversed) {
-      await io(() => _storage.update(step.task), 'update');
+      await io(() => _storage.update(_unheldIfFinished(step.task)), 'update');
     }
-    await io(() => _storage.update(root.task), 'update');
+    await io(() => _storage.update(_unheldIfFinished(root.task)), 'update');
     return [?root.event, for (final step in cascade) ?step.event];
+  }
+
+  /// Finished tasks are never held.
+  static StoredTask _unheldIfFinished(StoredTask task) {
+    if (!task.status.isTerminal || (!task.held && task.releaseAt == null)) {
+      return task;
+    }
+    return task.copyWith(held: false, releaseAt: null);
   }
 
   /// Decides, without writing, how tasks waiting on [id] change when [id]
@@ -1583,6 +1762,21 @@ final class DurableQueue {
           occurredAt: now,
           wasRunning: true,
         ),
+      );
+    }
+
+    if (task.held) {
+      // The user held it; the interrupted attempt does not count.
+      final attempts = task.attempts > 0 ? task.attempts - 1 : 0;
+      return _Resolved(
+        task.copyWith(
+          status: attempts > 0 ? TaskStatus.retryScheduled : TaskStatus.pending,
+          attempts: attempts,
+          updatedAt: now,
+          nextAttemptAt: StoredTask.heldNextAttemptAt,
+          releaseAt: null,
+        ),
+        null,
       );
     }
 
@@ -1931,6 +2125,7 @@ final class DurableQueue {
       Zone.current.handleUncaughtError(error, stackTrace);
     } finally {
       _cancelRequested.remove(claimed.id);
+      _holdInterrupted.remove(claimed.id);
       _cancelSignals.remove(claimed.id);
       _exitFlight();
       if (_runState == QueueRunState.running) unawaited(_pump());
@@ -1971,7 +2166,9 @@ final class DurableQueue {
       maxAttempts: claimed.retryPolicy.maxAttempts,
       idempotencyKey: claimed.idempotencyKey,
       deduplicationKey: claimed.deduplicationKey,
-      isCancellationRequested: () => _cancelRequested.contains(claimed.id),
+      isCancellationRequested: () =>
+          _cancelRequested.contains(claimed.id) ||
+          _holdInterrupted.contains(claimed.id),
       whenCancellationRequested: cancelSignal.future,
       onHandOff: (reference) {
         if (handlerDone) {
@@ -1992,10 +2189,12 @@ final class DurableQueue {
       );
     } on TaskCancelledException catch (error, stackTrace) {
       await _dropHandOff(claimed.id);
+      if (await _requeueForHold(claimed)) return;
       await _markCancelled(claimed, error, stackTrace);
       return;
     } on Object catch (error, stackTrace) {
       await _dropHandOff(claimed.id);
+      if (await _requeueForHold(claimed)) return;
       if (_cancelRequested.contains(claimed.id)) {
         await _markCancelled(claimed, error, stackTrace);
         return;
@@ -2088,6 +2287,7 @@ final class DurableQueue {
     _PendingHandOff handOff,
   ) async {
     await handOff.saved;
+    StoredTask? heldHandOff;
     final events = await _lock.synchronized(() async {
       final current = await _retryStorage(
         () => _storage.get(claimed.id),
@@ -2114,11 +2314,13 @@ final class DurableQueue {
       if (current.handOffReference != handOff.reference) {
         await _retryStorage(() => _storage.update(handedOff), 'update');
       }
+      if (current.held) heldHandOff = handedOff;
       return const <QueueEvent>[];
     });
     _pendingHandOffs.remove(claimed.id);
     _emitAll(events);
     final outcome = handOff.outcome;
+    if (heldHandOff != null && outcome == null) _emitHold(heldHandOff!);
     if (outcome == null || events.isNotEmpty) return;
     if (outcome.error == null) {
       await _markCompleted(claimed);
@@ -2157,6 +2359,7 @@ final class DurableQueue {
     Object error,
     StackTrace stackTrace,
   ) async {
+    if (await _requeueForHold(claimed)) return true;
     if (error is TaskCancelledException) {
       return _markCancelled(claimed, error, stackTrace);
     }
@@ -2480,6 +2683,7 @@ final class DurableQueue {
     });
     if (earliest == null || _runState != QueueRunState.running) return;
     if (_inFlight >= maxConcurrentTasks) return;
+    if (_isHeldTime(earliest)) return;
     _considerWake(earliest);
   }
 

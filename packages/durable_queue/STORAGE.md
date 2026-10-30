@@ -14,6 +14,8 @@ Since 0.5.4 it also includes `handOffReference` (nullable string), set while a t
 
 Since 0.5.8 it also includes `expiresAt` (nullable timestamp), after which a task that has not started is cancelled. Records written earlier have none and never expire. Adapters that store the `toJson` record need no change.
 
+Since 0.5.9 it also includes `held` (bool, default false) and `releaseAt` (nullable timestamp), set by `DurableQueue.hold`. A held task that is not running has `nextAttemptAt` set to `StoredTask.heldNextAttemptAt` (the year 9999), so `getNextReady` never returns it and adapters need no special query. Store that time exactly; the queue treats a wake time at or after it as "nothing scheduled". Records written earlier have neither field and are not held. Adapters that store the `toJson` record need no change.
+
 The payload is whatever the application put in `DurableTask.toJson`. Treat it as sensitive. This package does not encrypt it; `durable_queue_encryption` wraps any adapter and encrypts it before the adapter sees it.
 
 ## Methods

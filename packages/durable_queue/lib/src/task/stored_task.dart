@@ -40,6 +40,8 @@ final class StoredTask {
     this.group,
     this.handOffReference,
     this.expiresAt,
+    this.held = false,
+    this.releaseAt,
   }) : payload = _freezeMap(payload),
        dependsOn = List<String>.unmodifiable(LinkedHashSet.of(dependsOn)) {
     if (id.isEmpty) {
@@ -165,11 +167,32 @@ final class StoredTask {
   /// interrupted. Set by `DurableQueue.enqueue(expiresAt:)`.
   final DateTime? expiresAt;
 
+  /// Whether the task is held: set by `DurableQueue.hold`, cleared by
+  /// `DurableQueue.release`.
+  ///
+  /// A held task that is not running keeps its status but does not start:
+  /// its [nextAttemptAt] is [heldNextAttemptAt], so storage never selects
+  /// it, and [releaseAt] keeps the time it may start once released. On a
+  /// running task it means a hold was asked for: the handler was asked to
+  /// stop, or, for a handed-off task, the outside work was asked to pause.
+  /// Finished tasks are never held.
+  final bool held;
+
+  /// For a held task, when it may start once released: its start or retry
+  /// time from before the hold, or null for at once.
+  final DateTime? releaseAt;
+
+  /// The [nextAttemptAt] of a held task that is not running: far enough in
+  /// the future that storage never selects it. The queue does not wake for
+  /// it.
+  static final DateTime heldNextAttemptAt = DateTime.utc(9999);
+
   /// Returns a copy with the given fields replaced.
   ///
   /// Nullable fields use a sentinel so they can be cleared. Pass `null` to
   /// clear [nextAttemptAt], [deduplicationKey], [idempotencyKey],
-  /// [lastFailure], [group], [handOffReference], or [expiresAt].
+  /// [lastFailure], [group], [handOffReference], [expiresAt], or
+  /// [releaseAt].
   StoredTask copyWith({
     String? id,
     String? type,
@@ -191,6 +214,8 @@ final class StoredTask {
     Object? group = _unset,
     Object? handOffReference = _unset,
     Object? expiresAt = _unset,
+    bool? held,
+    Object? releaseAt = _unset,
   }) {
     return StoredTask(
       id: id ?? this.id,
@@ -225,6 +250,10 @@ final class StoredTask {
       expiresAt: identical(expiresAt, _unset)
           ? this.expiresAt
           : expiresAt as DateTime?,
+      held: held ?? this.held,
+      releaseAt: identical(releaseAt, _unset)
+          ? this.releaseAt
+          : releaseAt as DateTime?,
     );
   }
 
@@ -250,6 +279,8 @@ final class StoredTask {
     'group': group,
     'handOffReference': handOffReference,
     'expiresAt': expiresAt?.toIso8601String(),
+    'held': held,
+    'releaseAt': releaseAt?.toIso8601String(),
   };
 
   /// Restores a record produced by [toJson].
@@ -259,6 +290,8 @@ final class StoredTask {
   /// dependencies, [DependencyFailurePolicy.cancel], and no group. Records
   /// written before 0.5.4 have no `handOffReference` and load without one.
   /// Records written before 0.5.8 have no `expiresAt` and never expire.
+  /// Records written before 0.5.9 have no `held` or `releaseAt` and are not
+  /// held.
   factory StoredTask.fromJson(Map<String, dynamic> json) {
     final statusName = _requireString(json, 'status');
     final status = TaskStatus.values.where((value) => value.name == statusName);
@@ -293,6 +326,8 @@ final class StoredTask {
       group: _optionalString(json, 'group'),
       handOffReference: _optionalString(json, 'handOffReference'),
       expiresAt: _optionalDateTime(json, 'expiresAt'),
+      held: _optionalBool(json, 'held') ?? false,
+      releaseAt: _optionalDateTime(json, 'releaseAt'),
     );
   }
 
@@ -366,6 +401,12 @@ bool _requireBool(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value is bool) return value;
   throw FormatException('StoredTask.$key must be a bool');
+}
+
+bool? _optionalBool(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value == null || value is bool) return value as bool?;
+  throw FormatException('StoredTask.$key must be a bool or null');
 }
 
 DateTime _requireDateTime(Map<String, dynamic> json, String key) {

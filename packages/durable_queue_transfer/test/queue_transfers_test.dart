@@ -45,6 +45,21 @@ Future<void> until(bool Function() condition) async {
   if (!condition()) throw StateError('Condition not reached');
 }
 
+final class FileDownload extends dq.DurableTask {
+  FileDownload(this.name);
+
+  final String name;
+
+  @override
+  String get type => 'download';
+
+  @override
+  Map<String, dynamic> toJson() => {'name': name};
+
+  static FileDownload fromJson(Map<String, dynamic> json) =>
+      FileDownload(json['name'] as String);
+}
+
 void main() {
   late dq.FakeQueueClock clock;
   late FakeDownloader files;
@@ -483,6 +498,178 @@ void main() {
       expect((await stored(id)).status, dq.TaskStatus.completed);
     },
   );
+
+  group('hold and release', () {
+    late List<dq.TaskHoldChanged> holds;
+
+    setUp(() {
+      holds = [];
+      queue.holdChanges.listen(holds.add);
+      queue.register<FileDownload>(
+        type: 'download',
+        decoder: FileDownload.fromJson,
+        handler: (task, context) => transfers.start(
+          context,
+          DownloadTask(
+            url: 'https://example.com/${task.name}',
+            allowPause: task.name.startsWith('pausable'),
+          ),
+        ),
+      );
+    });
+
+    Future<String> enqueueDownload(String name) => queue.enqueue(
+      FileDownload(name),
+      retryPolicy: dq.RetryPolicy.fixed(maxAttempts: 3, delay: Duration.zero),
+    );
+
+    test('a held upload is stopped and starts again once released', () async {
+      await transfers.attach();
+      final id = await enqueueUpload();
+      await startAndWaitForTransfer();
+      final first = files.enqueued.single;
+      // background_downloader keeps a record of the stopped transfer.
+      files.fakeDatabase.records[first.taskId] = TaskRecord(
+        first,
+        TaskStatus.canceled,
+        0,
+        10,
+      );
+
+      expect(await queue.hold(id), isTrue);
+      await until(() => files.cancelled.isNotEmpty);
+      await pumpEventQueue();
+      expect(files.cancelled, ['dq-1-$id']);
+      var task = await stored(id);
+      expect(task.status, dq.TaskStatus.pending);
+      expect(task.held, isTrue);
+      expect(task.attempts, 0);
+
+      // The late report of the stopped transfer changes nothing.
+      files.emit(TaskStatusUpdate(first, TaskStatus.canceled));
+      await pumpEventQueue();
+      expect((await stored(id)).status, dq.TaskStatus.pending);
+
+      await queue.release(id);
+      await startAndWaitForTransfer(2);
+      final second = files.enqueued.last;
+      expect(second.taskId, 'dq-1.1-$id');
+      task = await stored(id);
+      expect(task.isHandedOff, isTrue);
+      expect(task.handOffReference, second.taskId);
+
+      files.emit(TaskStatusUpdate(second, TaskStatus.complete));
+      await pumpEventQueue();
+      expect((await stored(id)).status, dq.TaskStatus.completed);
+      expect(errors, isEmpty);
+    });
+
+    test('a pausable download is paused and resumed', () async {
+      await transfers.attach();
+      final id = await enqueueDownload('pausable.zip');
+      await startAndWaitForTransfer();
+      final transfer = files.enqueued.single;
+
+      await queue.hold(id);
+      await until(() => files.pauses.isNotEmpty);
+      await pumpEventQueue();
+      expect(files.pauses, [transfer.taskId]);
+      expect(files.cancelled, isEmpty);
+      var task = await stored(id);
+      expect(task.status, dq.TaskStatus.running);
+      expect(task.isHandedOff, isTrue);
+      expect(task.held, isTrue);
+
+      await queue.release(id);
+      await until(() => files.resumes.isNotEmpty);
+      await pumpEventQueue();
+      expect(files.resumes, [transfer.taskId]);
+      expect(files.enqueued, hasLength(1));
+      task = await stored(id);
+      expect(task.held, isFalse);
+      expect(task.isHandedOff, isTrue);
+
+      files.emit(TaskStatusUpdate(transfer, TaskStatus.complete));
+      await pumpEventQueue();
+      expect((await stored(id)).status, dq.TaskStatus.completed);
+    });
+
+    test('a download that cannot resume is downloaded again', () async {
+      await transfers.attach();
+      final id = await enqueueDownload('pausable.zip');
+      await startAndWaitForTransfer();
+      await queue.hold(id);
+      await until(() => files.pauses.isNotEmpty);
+      files.resumeResult = false;
+      await queue.release(id);
+      await until(() => files.enqueued.length == 2);
+      expect(files.enqueued.last.taskId, files.enqueued.first.taskId);
+      expect((await stored(id)).isHandedOff, isTrue);
+    });
+
+    test('a download without allowPause is stopped like an upload', () async {
+      await transfers.attach();
+      final id = await enqueueDownload('plain.zip');
+      await startAndWaitForTransfer();
+      await queue.hold(id);
+      await until(() => files.cancelled.isNotEmpty);
+      await pumpEventQueue();
+      expect(files.pauses, hasLength(1));
+      final task = await stored(id);
+      expect(task.status, dq.TaskStatus.pending);
+      expect(task.held, isTrue);
+    });
+
+    test('reconcile pauses a held transfer the app did not get to', () async {
+      final id = await enqueueDownload('pausable.zip');
+      await startAndWaitForTransfer();
+      await queue.hold(id);
+      await pumpEventQueue();
+      expect(files.pauses, isEmpty, reason: 'not attached');
+      await transfers.reconcile();
+      expect(files.pauses, hasLength(1));
+    });
+
+    test('reconcile resumes a released transfer still paused', () async {
+      final id = await enqueueDownload('pausable.zip');
+      await startAndWaitForTransfer();
+      final transfer = files.enqueued.single;
+      files.fakeDatabase.records[transfer.taskId] = TaskRecord(
+        transfer,
+        TaskStatus.paused,
+        0.5,
+        10,
+      );
+      await transfers.reconcile();
+      expect(files.resumes, [transfer.taskId]);
+      expect((await stored(id)).isHandedOff, isTrue);
+    });
+
+    test('a running transfer that was never paused is left alone', () async {
+      await transfers.attach();
+      final id = await enqueueDownload('pausable.zip');
+      await startAndWaitForTransfer();
+      // Simulate the pause not having taken effect yet.
+      files.resumeResult = false;
+      await transfers.dispose();
+      await queue.hold(id);
+      await queue.release(id);
+      await transfers.reconcile();
+      expect(files.resumes, isEmpty);
+      expect(files.enqueued, hasLength(1));
+    });
+
+    test('nothing happens after dispose', () async {
+      await transfers.attach();
+      final id = await enqueueUpload();
+      await startAndWaitForTransfer();
+      await transfers.dispose();
+      await queue.hold(id);
+      await pumpEventQueue();
+      expect(files.cancelled, isEmpty);
+      expect(holds, hasLength(1));
+    });
+  });
 }
 
 final class _Quick extends dq.DurableTask {

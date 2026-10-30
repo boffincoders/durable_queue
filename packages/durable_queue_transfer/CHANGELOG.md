@@ -1,3 +1,16 @@
+## 0.2.0
+
+* Pause and resume transfers with `DurableQueue.hold` and `release`.
+  Downloads created with `allowPause: true` are paused by
+  background_downloader and continue where they stopped. Other transfers are
+  cancelled and start again from the beginning once released, without
+  counting the interrupted attempt. `reconcile` applies holds the app did not
+  get to.
+* A transfer restarted after a hold gets a new id
+  (`dq-<attempt>.<n>-<queue task id>`), so late updates of the stopped
+  transfer are not applied to the new one.
+* Requires `durable_queue` 0.5.9 or later.
+
 ## 0.1.2
 
 Documentation only; no code changes.

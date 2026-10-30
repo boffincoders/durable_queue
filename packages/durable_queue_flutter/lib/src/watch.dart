@@ -8,7 +8,8 @@ extension DurableQueueWatch on DurableQueue {
   ///
   /// Emits the current record when listened to (null if it is not stored),
   /// then again after each event for [id]: enqueued, started, retry
-  /// scheduled, deferred, completed, failed, or cancelled. Records that did
+  /// scheduled, deferred, completed, failed, or cancelled, and after it is
+  /// held or released (see `DurableQueue.holdChanges`). Records that did
   /// not change are not repeated. `delete` and `purge` emit no events, so a
   /// deleted task keeps its last value until the next event for [id].
   ///
@@ -16,7 +17,7 @@ extension DurableQueueWatch on DurableQueue {
   Stream<StoredTask?> watchTask(String id) {
     return _watch<StoredTask?>(
       read: () => getTask(id),
-      affects: (event) => event.taskId == id,
+      affects: (taskId, isEnqueue) => taskId == id,
       same: (a, b) => _sameRecord(a, b),
     );
   }
@@ -25,8 +26,8 @@ extension DurableQueueWatch on DurableQueue {
   /// whenever one of them may have changed.
   ///
   /// Emits the current list when listened to (oldest first), then again
-  /// after events for tasks in the last list and after every enqueue (a new
-  /// task may join the group). Bursts of events cause one reload. Each
+  /// after events and hold changes for tasks in the last list and after
+  /// every enqueue (a new task may join the group). Bursts of events cause one reload. Each
   /// reload runs `getTasks(group:)`, so keep groups to the size of a screen,
   /// for example one album's uploads.
   ///
@@ -42,7 +43,7 @@ extension DurableQueueWatch on DurableQueue {
         ids = {for (final task in tasks) task.id};
         return tasks;
       },
-      affects: (event) => event is TaskEnqueued || ids.contains(event.taskId),
+      affects: (taskId, isEnqueue) => isEnqueue || ids.contains(taskId),
       same: (a, b) {
         if (a.length != b.length) return false;
         for (var i = 0; i < a.length; i++) {
@@ -55,11 +56,12 @@ extension DurableQueueWatch on DurableQueue {
 
   Stream<T> _watch<T>({
     required Future<T> Function() read,
-    required bool Function(QueueEvent event) affects,
+    required bool Function(String taskId, bool isEnqueue) affects,
     required bool Function(T a, T b) same,
   }) {
     late StreamController<T> controller;
     StreamSubscription<QueueEvent>? subscription;
+    StreamSubscription<TaskHoldChanged>? holds;
     var hasValue = false;
     late T last;
     var loading = false;
@@ -94,9 +96,12 @@ extension DurableQueueWatch on DurableQueue {
 
     controller = StreamController<T>(
       onListen: () {
+        holds = holdChanges.listen((change) {
+          if (affects(change.taskId, false)) reload();
+        });
         subscription = events.listen(
           (event) {
-            if (affects(event)) reload();
+            if (affects(event.taskId, event is TaskEnqueued)) reload();
           },
           onDone: () async {
             // Let a reload in progress deliver its value first.
@@ -108,7 +113,10 @@ extension DurableQueueWatch on DurableQueue {
         );
         reload();
       },
-      onCancel: () => subscription?.cancel(),
+      onCancel: () async {
+        await holds?.cancel();
+        await subscription?.cancel();
+      },
     );
     return controller.stream;
   }
@@ -121,5 +129,6 @@ bool _sameRecord(StoredTask? a, StoredTask? b) {
       a.status == b.status &&
       a.attempts == b.attempts &&
       a.updatedAt == b.updatedAt &&
-      a.nextAttemptAt == b.nextAttemptAt;
+      a.nextAttemptAt == b.nextAttemptAt &&
+      a.held == b.held;
 }

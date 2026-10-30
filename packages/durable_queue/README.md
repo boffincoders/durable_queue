@@ -32,6 +32,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Task dependencies, chains, and groups
 * Deduplication and idempotency keys
 * Cooperative cancellation, pause, resume, and stop
+* Hold and release one task, for example to let a user pause one upload
 * `drain`: run what is ready within a time limit, for background jobs
 * Hand-off: a task can wait for work the operating system finishes, such as a background upload
 * Lifecycle events, queries by status or group, counts per status, and `waitFor` one task
@@ -447,6 +448,21 @@ handler: (task, context) async {
 ```
 
 `pause` finishes handlers that have already started and does not start new ones. `stop` waits for those handlers and leaves everything else stored.
+
+### Hold and release one task
+
+`pause` and `resume` act on the whole queue. To let a user pause one task, such as one upload in a list, hold it:
+
+```dart
+await queue.hold(taskId);    // pause this one
+await queue.release(taskId); // and carry on
+```
+
+* A task that has not started stays in the queue but does not start. Its start or retry time is kept for `release`, and tasks that depend on it keep waiting.
+* A running task is asked to stop, as for `cancel`. When the handler then throws, the task goes back to the queue held, and the interrupted attempt does not count. A handler that finishes anyway completes the task.
+* A task handed off to outside work stays running and is reported on `queue.holdChanges`, so that work can pause. `durable_queue_transfer` pauses downloads that support it and restarts other transfers after `release`.
+
+`hold` and `release` return false when there is nothing to change. A held task keeps its status, holds its deduplication key, and can still be cancelled; `StoredTask.held` tells a UI to show it as paused. Holding does not stop a task from expiring. Holds are stored, so they survive a restart. Hold changes are reported on `queue.holdChanges`, separately from `queue.events`, so existing `switch` statements over events keep compiling.
 
 ## Retry, delete, and purge finished tasks
 
