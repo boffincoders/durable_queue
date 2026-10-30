@@ -20,10 +20,10 @@ const int currentSchemaVersion = 1;
 final class QueueSql {
   /// Creates statements for tables named with [prefix].
   QueueSql(String prefix)
-      : tasks = '${prefix}tasks',
-        edges = '${prefix}waiting_edges',
-        meta = '${prefix}meta',
-        _p = prefix;
+    : tasks = '${prefix}tasks',
+      edges = '${prefix}waiting_edges',
+      meta = '${prefix}meta',
+      _p = prefix;
 
   final String _p;
 
@@ -37,7 +37,8 @@ final class QueueSql {
   final String meta;
 
   /// Creates the metadata table.
-  String get createMeta => 'CREATE TABLE IF NOT EXISTS $meta '
+  String get createMeta =>
+      'CREATE TABLE IF NOT EXISTS $meta '
       '(key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL)';
 
   /// Reads the schema version.
@@ -50,36 +51,36 @@ final class QueueSql {
 
   /// Schema version 1.
   List<String> get schemaV1 => [
-        'CREATE TABLE IF NOT EXISTS $tasks ('
-            'id TEXT NOT NULL PRIMARY KEY, '
-            'status TEXT NOT NULL, '
-            'priority INTEGER NOT NULL, '
-            'created_at_us INTEGER NOT NULL, '
-            'sequence INTEGER NOT NULL, '
-            'next_attempt_at_us INTEGER, '
-            'deduplication_key TEXT, '
-            'task_group TEXT, '
-            'record TEXT NOT NULL)',
-        'CREATE TABLE IF NOT EXISTS $edges ('
-            'dependency_id TEXT NOT NULL, '
-            'task_id TEXT NOT NULL, '
-            'PRIMARY KEY (dependency_id, task_id)) WITHOUT ROWID',
-        'CREATE INDEX IF NOT EXISTS ${_p}tasks_by_status '
-            'ON $tasks (status, $_order)',
-        'CREATE INDEX IF NOT EXISTS ${_p}tasks_ready '
-            'ON $tasks (priority DESC, $_order) '
-            'WHERE status IN $_schedulable',
-        'CREATE INDEX IF NOT EXISTS ${_p}tasks_wake '
-            'ON $tasks (next_attempt_at_us) '
-            'WHERE status IN $_schedulable AND next_attempt_at_us IS NOT NULL',
-        'CREATE INDEX IF NOT EXISTS ${_p}tasks_dedup '
-            'ON $tasks (deduplication_key, $_order) '
-            'WHERE deduplication_key IS NOT NULL AND status IN $_active',
-        'CREATE INDEX IF NOT EXISTS ${_p}tasks_group '
-            'ON $tasks (task_group, $_order) WHERE task_group IS NOT NULL',
-        'CREATE INDEX IF NOT EXISTS ${_p}tasks_sequence ON $tasks (sequence)',
-        'CREATE INDEX IF NOT EXISTS ${_p}edges_by_task ON $edges (task_id)',
-      ];
+    'CREATE TABLE IF NOT EXISTS $tasks ('
+        'id TEXT NOT NULL PRIMARY KEY, '
+        'status TEXT NOT NULL, '
+        'priority INTEGER NOT NULL, '
+        'created_at_us INTEGER NOT NULL, '
+        'sequence INTEGER NOT NULL, '
+        'next_attempt_at_us INTEGER, '
+        'deduplication_key TEXT, '
+        'task_group TEXT, '
+        'record TEXT NOT NULL)',
+    'CREATE TABLE IF NOT EXISTS $edges ('
+        'dependency_id TEXT NOT NULL, '
+        'task_id TEXT NOT NULL, '
+        'PRIMARY KEY (dependency_id, task_id)) WITHOUT ROWID',
+    'CREATE INDEX IF NOT EXISTS ${_p}tasks_by_status '
+        'ON $tasks (status, $_order)',
+    'CREATE INDEX IF NOT EXISTS ${_p}tasks_ready '
+        'ON $tasks (priority DESC, $_order) '
+        'WHERE status IN $_schedulable',
+    'CREATE INDEX IF NOT EXISTS ${_p}tasks_wake '
+        'ON $tasks (next_attempt_at_us) '
+        'WHERE status IN $_schedulable AND next_attempt_at_us IS NOT NULL',
+    'CREATE INDEX IF NOT EXISTS ${_p}tasks_dedup '
+        'ON $tasks (deduplication_key, $_order) '
+        'WHERE deduplication_key IS NOT NULL AND status IN $_active',
+    'CREATE INDEX IF NOT EXISTS ${_p}tasks_group '
+        'ON $tasks (task_group, $_order) WHERE task_group IS NOT NULL',
+    'CREATE INDEX IF NOT EXISTS ${_p}tasks_sequence ON $tasks (sequence)',
+    'CREATE INDEX IF NOT EXISTS ${_p}edges_by_task ON $edges (task_id)',
+  ];
 
   /// Columns written for every task, in [insertTask] / [updateTask] order.
   static const columns = [
@@ -97,7 +98,8 @@ final class QueueSql {
   String get exists => 'SELECT 1 FROM $tasks WHERE id = ?';
 
   /// Inserts a task: id, then [columns].
-  String get insertTask => 'INSERT INTO $tasks (id, ${columns.join(', ')}) '
+  String get insertTask =>
+      'INSERT INTO $tasks (id, ${columns.join(', ')}) '
       'VALUES (?, ${List.filled(columns.length, '?').join(', ')})';
 
   /// Replaces a task: [columns], then id.

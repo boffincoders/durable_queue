@@ -111,10 +111,12 @@ void main() {
     await queue.start();
 
     await expectLater(
-      db.transaction(() async {
-        await db.customStatement("INSERT INTO orders VALUES ('1')");
-        await queue.enqueue(Note('order 1'));
-      }).timeout(const Duration(seconds: 10)),
+      db
+          .transaction(() async {
+            await db.customStatement("INSERT INTO orders VALUES ('1')");
+            await queue.enqueue(Note('order 1'));
+          })
+          .timeout(const Duration(seconds: 10)),
       throwsA(
         isA<StateError>().having(
           (e) => e.message,
@@ -123,10 +125,7 @@ void main() {
         ),
       ),
     );
-    expect(
-      db.transaction(() => storage.get('x')),
-      throwsA(isA<StateError>()),
-    );
+    expect(db.transaction(() => storage.get('x')), throwsA(isA<StateError>()));
 
     // After the transaction, enqueue works and the queue keeps running.
     await db.customStatement("INSERT INTO orders VALUES ('1')");

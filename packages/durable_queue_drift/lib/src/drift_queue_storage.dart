@@ -31,7 +31,7 @@ import 'sql.dart';
 /// `DurableQueue` should use a given database and table prefix at a time.
 final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
   DriftQueueStorage._(this._db, String tablePrefix)
-      : _sql = QueueSql(tablePrefix);
+    : _sql = QueueSql(tablePrefix);
 
   /// Creates the tables in [database] if needed and returns a storage that
   /// uses them.
@@ -83,30 +83,28 @@ final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
 
   @override
   Future<void> save(StoredTask task) => _write(() async {
-        if (await _exists(task.id)) {
-          throw StateError('Task "${task.id}" already exists');
-        }
-        await _db
-            .customStatement(_sql.insertTask, [task.id, ..._columns(task)]);
-        await _writeEdges(task);
-      });
+    if (await _exists(task.id)) {
+      throw StateError('Task "${task.id}" already exists');
+    }
+    await _db.customStatement(_sql.insertTask, [task.id, ..._columns(task)]);
+    await _writeEdges(task);
+  });
 
   @override
   Future<void> update(StoredTask task) => _write(() async {
-        if (!await _exists(task.id)) {
-          throw StateError('Task "${task.id}" does not exist');
-        }
-        await _db
-            .customStatement(_sql.updateTask, [..._columns(task), task.id]);
-        await _db.customStatement(_sql.deleteEdges, [task.id]);
-        await _writeEdges(task);
-      });
+    if (!await _exists(task.id)) {
+      throw StateError('Task "${task.id}" does not exist');
+    }
+    await _db.customStatement(_sql.updateTask, [..._columns(task), task.id]);
+    await _db.customStatement(_sql.deleteEdges, [task.id]);
+    await _writeEdges(task);
+  });
 
   @override
   Future<void> delete(String id) => _write(() async {
-        await _db.customStatement(_sql.deleteTask, [id]);
-        await _db.customStatement(_sql.deleteEdges, [id]);
-      });
+    await _db.customStatement(_sql.deleteTask, [id]);
+    await _db.customStatement(_sql.deleteEdges, [id]);
+  });
 
   @override
   Future<StoredTask?> get(String id) => _one(_sql.selectById, [id]);
@@ -118,10 +116,7 @@ final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
   Future<List<StoredTask>> getPending() => getByStatus(TaskStatus.pending);
 
   @override
-  Future<List<StoredTask>> getByStatus(
-    TaskStatus status, {
-    int? limit,
-  }) async {
+  Future<List<StoredTask>> getByStatus(TaskStatus status, {int? limit}) async {
     if (limit != null && limit < 1) {
       throw ArgumentError.value(limit, 'limit', 'Must be positive');
     }
@@ -164,27 +159,27 @@ final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
   // Internals.
 
   Future<void> _migrate() => _write(() async {
-        await _db.customStatement(_sql.createMeta);
-        final rows = await _db.customSelect(_sql.selectVersion).get();
-        final stored =
-            rows.isEmpty ? 0 : int.parse(rows.single.read<String>('value'));
-        if (stored > currentSchemaVersion) {
-          throw StateError(
-            'The ${_sql.tasks} table uses schema version $stored, but this '
-            'version of durable_queue_drift supports up to '
-            '$currentSchemaVersion. Upgrade durable_queue_drift.',
-          );
-        }
-        if (stored < 1) {
-          for (final statement in _sql.schemaV1) {
-            await _db.customStatement(statement);
-          }
-        }
-        if (stored != currentSchemaVersion) {
-          await _db
-              .customStatement(_sql.upsertVersion, ['$currentSchemaVersion']);
-        }
-      });
+    await _db.customStatement(_sql.createMeta);
+    final rows = await _db.customSelect(_sql.selectVersion).get();
+    final stored = rows.isEmpty
+        ? 0
+        : int.parse(rows.single.read<String>('value'));
+    if (stored > currentSchemaVersion) {
+      throw StateError(
+        'The ${_sql.tasks} table uses schema version $stored, but this '
+        'version of durable_queue_drift supports up to '
+        '$currentSchemaVersion. Upgrade durable_queue_drift.',
+      );
+    }
+    if (stored < 1) {
+      for (final statement in _sql.schemaV1) {
+        await _db.customStatement(statement);
+      }
+    }
+    if (stored != currentSchemaVersion) {
+      await _db.customStatement(_sql.upsertVersion, ['$currentSchemaVersion']);
+    }
+  });
 
   Future<void> _write(Future<void> Function() body) {
     _ensureOpen();
@@ -203,29 +198,33 @@ final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
   }
 
   static List<Object?> _columns(StoredTask task) => [
-        task.status.name,
-        task.priority,
-        task.createdAt.microsecondsSinceEpoch,
-        task.sequence,
-        task.nextAttemptAt?.microsecondsSinceEpoch,
-        task.deduplicationKey,
-        task.group,
-        jsonEncode(task.toJson()),
-      ];
+    task.status.name,
+    task.priority,
+    task.createdAt.microsecondsSinceEpoch,
+    task.sequence,
+    task.nextAttemptAt?.microsecondsSinceEpoch,
+    task.deduplicationKey,
+    task.group,
+    jsonEncode(task.toJson()),
+  ];
 
   static Variable<Object> _variable(Object value) => switch (value) {
-        final int number => Variable<int>(number),
-        final String text => Variable<String>(text),
-        _ => throw ArgumentError.value(value, 'value', 'Unsupported parameter'),
-      };
+    final int number => Variable<int>(number),
+    final String text => Variable<String>(text),
+    _ => throw ArgumentError.value(value, 'value', 'Unsupported parameter'),
+  };
 
   Future<StoredTask?> _one(
     String sql, [
     List<Object> parameters = const [],
   ]) async {
     _ensureOpen();
-    final rows = await _db.customSelect(sql,
-        variables: [for (final p in parameters) _variable(p)]).get();
+    final rows = await _db
+        .customSelect(
+          sql,
+          variables: [for (final p in parameters) _variable(p)],
+        )
+        .get();
     return rows.isEmpty ? null : _decode(rows.first.read<String>('record'));
   }
 
@@ -234,8 +233,12 @@ final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
     List<Object> parameters = const [],
   ]) async {
     _ensureOpen();
-    final rows = await _db.customSelect(sql,
-        variables: [for (final p in parameters) _variable(p)]).get();
+    final rows = await _db
+        .customSelect(
+          sql,
+          variables: [for (final p in parameters) _variable(p)],
+        )
+        .get();
     return List<StoredTask>.unmodifiable(
       rows.map((row) => _decode(row.read<String>('record'))),
     );
