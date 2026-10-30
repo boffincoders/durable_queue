@@ -39,7 +39,8 @@ import 'payload_cipher.dart';
 ///
 /// Every queue or connection that opens the same storage must use this
 /// wrapper with the same keys.
-final class EncryptedQueueStorage implements QueueStorage {
+final class EncryptedQueueStorage
+    implements QueueStorage, QueueStorageCallGuard {
   /// Wraps [inner], encrypting with [cipher].
   ///
   /// When [readPlaintext] is true, tasks stored before encryption was added
@@ -73,6 +74,13 @@ final class EncryptedQueueStorage implements QueueStorage {
 
   /// The wrapped storage. Records read from it directly are encrypted.
   QueueStorage get inner => _inner;
+
+  /// Passes the check on to [inner] when it has one, for example
+  /// `durable_queue_drift`'s refusal of calls inside a drift transaction.
+  @override
+  void checkCall() {
+    if (_inner case final QueueStorageCallGuard guard) guard.checkCall();
+  }
 
   @override
   Future<void> save(StoredTask task) async => _inner.save(await _seal(task));

@@ -1,3 +1,21 @@
+## 0.5.10
+
+New features, no breaking changes.
+
+* `schedule(name, every:, task:)` and `unschedule(name)`: recurring tasks.
+  One occurrence is stored at a time; the next is stored when it finishes.
+  Missed slots run once, not repeatedly. Each occurrence has an idempotency
+  key naming its slot. `schedules` lists the names.
+* `QueueMetrics`: counts, success rate, and run and wait times, in total and
+  per task type, collected from the event stream. `snapshot().toJson()` for
+  analytics.
+* `QueueLogger`: one log record per event, hold change, and storage error,
+  with a level and `minLevel` filter.
+* `QueueStorageCallGuard`: a storage can refuse a call before the queue
+  waits for other work. `durable_queue_drift` uses it to refuse calls made
+  inside a drift transaction, which could otherwise wait forever.
+* `clock`: the queue's clock.
+
 ## 0.5.9
 
 New features, no breaking changes. Storage adapters must persist the new

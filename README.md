@@ -22,6 +22,7 @@ Full videos on real phones: [iPhone](https://github.com/boffincoders/durable_que
 | [`durable_queue`](packages/durable_queue) | Core engine. Pure Dart, no runtime dependencies. | [![pub package](https://img.shields.io/pub/v/durable_queue.svg)](https://pub.dev/packages/durable_queue) |
 | [`durable_queue_sqlite`](packages/durable_queue_sqlite) | SQLite storage: tasks survive restarts and crashes. | [![pub package](https://img.shields.io/pub/v/durable_queue_sqlite.svg)](https://pub.dev/packages/durable_queue_sqlite) |
 | [`durable_queue_hive`](packages/durable_queue_hive) | Hive storage (`hive_ce`) for apps that already use Hive: tasks survive restarts and crashes, on mobile, desktop, and web. | [![pub package](https://img.shields.io/pub/v/durable_queue_hive.svg)](https://pub.dev/packages/durable_queue_hive) |
+| [`durable_queue_drift`](packages/durable_queue_drift) | drift storage for apps that already use drift: tasks live in your app's drift database, on mobile, desktop, and web. | [![pub package](https://img.shields.io/pub/v/durable_queue_drift.svg)](https://pub.dev/packages/durable_queue_drift) |
 | [`durable_queue_encryption`](packages/durable_queue_encryption) | Encryption at rest: wraps any storage and encrypts task payloads and error messages with AES-256-GCM. | [![pub package](https://img.shields.io/pub/v/durable_queue_encryption.svg)](https://pub.dev/packages/durable_queue_encryption) |
 | [`durable_queue_dio`](packages/durable_queue_dio) | Dio integration: HTTP retry rules, `Retry-After`, idempotency keys, cancellation, queued requests. | [![pub package](https://img.shields.io/pub/v/durable_queue_dio.svg)](https://pub.dev/packages/durable_queue_dio) |
 | [`durable_queue_flutter`](packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. | [![pub package](https://img.shields.io/pub/v/durable_queue_flutter.svg)](https://pub.dev/packages/durable_queue_flutter) |
@@ -64,8 +65,9 @@ The core engine decides *when* each task runs. Everything else plugs into one of
            │                   │                    │
            │                   │                    │
  durable_queue_        durable_queue_      durable_queue_dio
- connectivity          sqlite, _hive       HTTP requests, retry
- waits while offline   survive restarts    rules, Retry-After
+ connectivity          sqlite, _hive,      HTTP requests, retry
+ waits while offline   _drift              rules, Retry-After
+                       survive restarts
 
                        durable_queue_      durable_queue_transfer
                        encryption          uploads, downloads the
@@ -110,6 +112,7 @@ packages/
   durable_queue_transfer/       background uploads and downloads (published to pub.dev; outside the workspace)
   durable_queue_workmanager/    Workmanager background jobs (published to pub.dev; outside the workspace)
   durable_queue_dio/            Dio integration (published to pub.dev)
+  durable_queue_drift/          drift storage (published to pub.dev)
   durable_queue_encryption/     encryption at rest (published to pub.dev)
   durable_queue_hive/           Hive storage (published to pub.dev)
   durable_queue_sqlite/         SQLite storage (published to pub.dev)

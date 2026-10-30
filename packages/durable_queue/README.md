@@ -26,6 +26,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Fixed and exponential retry with optional jitter, and a `retryIf` filter
 * Concurrency limits and priorities
 * Scheduled tasks: start at a given time or after a delay
+* Recurring tasks: run a task every few hours, across restarts
 * Timeouts per task type, and tasks that expire if they have not started in time
 * Rate limits per task type, or per key such as an API host
 * Gates: tasks that need the network wait while offline, without using attempts
@@ -36,6 +37,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * `drain`: run what is ready within a time limit, for background jobs
 * Hand-off: a task can wait for work the operating system finishes, such as a background upload
 * Lifecycle events, queries by status or group, counts per status, and `waitFor` one task
+* Ready-made metrics (counts, success rate, run and wait times per task type) and logging
 * Startup recovery of tasks interrupted by a crash
 * An injectable clock, so retry logic is testable without waiting
 * Pure Dart: no HTTP client, database, Flutter, or state-management dependency
@@ -56,6 +58,7 @@ dependencies:
 | [`durable_queue`](https://pub.dev/packages/durable_queue) | The engine: tasks, retries, priorities, dependencies, rate limits, gates. |
 | [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | SQLite storage that survives restarts, on Android, iOS, macOS, Windows, Linux, and the web. |
 | [`durable_queue_hive`](https://pub.dev/packages/durable_queue_hive) | Hive storage on `hive_ce`, for apps that already use Hive, on Android, iOS, macOS, Windows, Linux, and the web. |
+| [`durable_queue_drift`](https://pub.dev/packages/durable_queue_drift) | drift storage: tasks live in your app's drift database, on Android, iOS, macOS, Windows, Linux, and the web. |
 | [`durable_queue_encryption`](https://pub.dev/packages/durable_queue_encryption) | Encryption at rest: wraps any storage and encrypts task payloads, error messages, deduplication keys, and groups with AES-256-GCM. |
 | [`durable_queue_dio`](https://pub.dev/packages/durable_queue_dio) | Dio integration: retry rules for HTTP errors, `Retry-After`, idempotency headers, cancellation, queued HTTP requests. |
 | [`durable_queue_flutter`](https://pub.dev/packages/durable_queue_flutter) | Flutter integration: start the queue with the app, pause it in the background, and rebuild widgets from stored tasks. |
@@ -138,8 +141,9 @@ The core engine decides *when* each task runs. Everything else plugs into one of
            │                   │                    │
            │                   │                    │
  durable_queue_        durable_queue_      durable_queue_dio
- connectivity          sqlite, _hive       HTTP requests, retry
- waits while offline   survive restarts    rules, Retry-After
+ connectivity          sqlite, _hive,      HTTP requests, retry
+ waits while offline   _drift              rules, Retry-After
+                       survive restarts
 
                        durable_queue_      durable_queue_transfer
                        encryption          uploads, downloads the
@@ -279,6 +283,30 @@ await queue.enqueue(SyncTask(), delay: Duration(minutes: 15));
 The task is stored at once and starts when its time comes and a slot is free. While it waits it is `pending`, counts as active, and holds its deduplication key. A time in the past means "now". With `dependsOn`, the task starts once its dependencies have completed and its time has come. `enqueueChain` applies the time to the first step.
 
 The queue only runs while your app runs: a task scheduled for 3 a.m. starts at 3 a.m. if the app is running then, or on the next launch otherwise.
+
+## Recurring tasks
+
+Run a task on a fixed interval with `schedule`. Call it on every launch, after `register`, as you do for task types:
+
+```dart
+await queue.schedule(
+  'sync-contacts',
+  every: Duration(hours: 6),
+  task: () => SyncContactsTask(),
+  retryPolicy: RetryPolicy.exponential(
+    maxAttempts: 3,
+    initialDelay: Duration(minutes: 1),
+  ),
+);
+```
+
+One occurrence is stored at a time. It is an ordinary task, with retries, gates, and events. When it completes, fails, or is cancelled, the next occurrence is stored for the next slot. Slots are `every` apart, starting now or at `firstRunAt`, and survive restarts: calling `schedule` again on the next launch keeps the stored occurrence.
+
+If slots were missed, for example while the app was closed, the task runs once as soon as possible and then continues on the original slots. Missed runs are not repeated.
+
+Each occurrence has an idempotency key naming its slot, such as `schedule:sync-contacts@2026-11-01T06:00:00.000Z`, which a handler can send to a server so a repeated attempt is recognised. Occurrences are in the group `schedule:sync-contacts`, so `getTasks(group:)` shows the history; finished ones stay stored until you `purge` them.
+
+`unschedule('sync-contacts')` cancels the waiting occurrence and stores no more. Remove the `schedule` call from the app too, or the next launch starts it again. As with any task, an occurrence only runs while the queue runs; for work while the app is closed, see [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager).
 
 ## Timeouts and expiry
 
@@ -563,6 +591,23 @@ if (done.status != TaskStatus.completed) print(done.lastFailure);
 
 The event stream is broadcast and does not replay events that happened before the listener subscribed.
 
+### Metrics and logging
+
+`QueueMetrics` and `QueueLogger` listen to the event stream for you:
+
+```dart
+final metrics = QueueMetrics(queue);
+QueueLogger(queue, onRecord: (record) => debugPrint('$record'));
+
+// later, for example once a day:
+analytics.log('queue', metrics.snapshot().toJson());
+metrics.reset();
+```
+
+A snapshot has, in total and per task type: enqueued, started, completed, failed, retried, cancelled, and deferred counts, the success rate, and the average and longest run time (from an attempt's start to its outcome) and wait time (from enqueue, or a later `runAt`, to the first attempt). Numbers are kept in memory from the moment `QueueMetrics` is created.
+
+`QueueLogger` turns events, holds, and storage errors into one-line records with a level: `debug` for routine progress, `info` for outcomes, `warning` for retries and storage errors, and `error` for tasks that failed for good. Pass `minLevel` to drop routine records. Records name task ids and types, never payloads.
+
 Worker storage errors are reported as values on `queue.storageErrors` and retried after `storageRetryDelay` (default one second). A failed result write retries persistence without running the handler again. Storage outages hold serialized operations, so enqueue, queries, cancellation, pause, and stop can wait until storage recovers. Failed startup recovery leaves the queue idle and allows another `start()` call.
 
 ## Using it in Flutter
@@ -602,7 +647,9 @@ The engine talks to storage only through `QueueStorage`, so you choose where tas
 | `MemoryQueueStorage` | No | Included. For tests and process-lifetime queues. |
 | `JsonFileStorage` | Yes | Example in `example/json_file_storage.dart`, checked against the full storage contract. Rewrites one file per change, so it suits small queues. |
 | [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) | Yes | Separate package. Indexed, transactional SQLite storage for Android, iOS, macOS, Windows, Linux, and the web. Use 0.2.1 or later with `durable_queue` 0.5. |
-| Hive, Isar, others | Yes | Adapters are welcome as separate packages; say what you need in Discussions. |
+| [`durable_queue_drift`](https://pub.dev/packages/durable_queue_drift) | Yes | Separate package. The same tables as `durable_queue_sqlite`, inside your app's drift database. |
+| [`durable_queue_hive`](https://pub.dev/packages/durable_queue_hive) | Yes | Separate package. Hive storage on `hive_ce`, for apps that already use Hive. |
+| Isar, others | Yes | Adapters are welcome as separate packages; say what you need in Discussions. |
 
 Adapters stay in separate packages so the core never forces a database on you.
 

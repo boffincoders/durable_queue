@@ -39,6 +39,20 @@ const _secrets = [
 ];
 
 void main() {
+  test('passes the call guard on to the wrapped storage', () {
+    final guarded = _GuardedStorage();
+    final wrapper = EncryptedQueueStorage(guarded, cipher: AesGcmCipher(_key1));
+    wrapper.checkCall();
+    guarded.refuse = true;
+    expect(wrapper.checkCall, throwsStateError);
+    // A storage without a guard needs no check.
+    final plain = EncryptedQueueStorage(
+      MemoryQueueStorage(),
+      cipher: AesGcmCipher(_key1),
+    );
+    plain.checkCall();
+  });
+
   late MemoryQueueStorage inner;
   late EncryptedQueueStorage storage;
 
@@ -321,4 +335,21 @@ final class _Note extends DurableTask {
 
   @override
   Map<String, dynamic> toJson() => {'text': text};
+}
+
+/// A storage that can refuse calls, like durable_queue_drift.
+final class _GuardedStorage implements QueueStorage, QueueStorageCallGuard {
+  final _inner = MemoryQueueStorage();
+  var refuse = false;
+
+  @override
+  void checkCall() {
+    if (refuse) throw StateError('refused');
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+
+  @override
+  Future<StoredTask?> get(String id) => _inner.get(id);
 }

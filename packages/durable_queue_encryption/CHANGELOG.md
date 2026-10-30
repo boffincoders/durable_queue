@@ -1,3 +1,10 @@
+## 0.1.1
+
+* Passes `QueueStorageCallGuard` checks on to the wrapped storage, so
+  `durable_queue_drift` still refuses calls made inside a drift transaction
+  when it is encrypted.
+* Requires `durable_queue` 0.5.10 or later.
+
 ## 0.1.0
 
 * Initial release.

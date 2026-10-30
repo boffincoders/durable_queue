@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:durable_queue/durable_queue.dart';
 import 'package:test/test.dart';
 
@@ -6,13 +8,13 @@ import 'stored_task_builder.dart';
 /// Behaviors every [QueueStorage] adapter must satisfy.
 ///
 /// Run it from an adapter's tests with a factory that returns a fresh, empty
-/// storage for every test. The scenarios are also described in the core
-/// package's `STORAGE.md`.
-void queueStorageContractTests(QueueStorage Function() create) {
+/// storage for every test; it may be asynchronous. The scenarios are also
+/// described in the core package's `STORAGE.md`.
+void queueStorageContractTests(FutureOr<QueueStorage> Function() create) {
   late QueueStorage storage;
 
-  setUp(() {
-    storage = create();
+  setUp(() async {
+    storage = await create();
   });
 
   test('save then get returns the same record', () async {

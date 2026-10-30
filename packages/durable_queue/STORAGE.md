@@ -64,6 +64,12 @@ The queue settles dependencies; adapters only store and index them. When a task 
 
 Only one live `DurableQueue` should use a storage instance. Two runners will both claim work.
 
+## Refusing calls from a locked context
+
+A storage whose database the caller can lock, for example by calling the queue inside an open database transaction, can implement `QueueStorageCallGuard` (since 0.5.10). The queue calls `checkCall()` at the start of each public method, in the caller's zone and before it waits for other queue work; throw there to refuse the call. Otherwise such a call can wait for a queue operation that is itself waiting for the caller's lock. `durable_queue_drift` refuses calls made inside a drift transaction this way. A storage that wraps another one, like `durable_queue_encryption`, forwards the check.
+
+`queueStorageContractTests` accepts a factory that returns the storage or a `Future` of it, for adapters that open asynchronously.
+
 ## Bounded worker queries and adapter migration
 
 Adapters implementing the earlier interface must add `getNextReady`, `getNextWakeAt`, and `getMaxSequence`, and accept `limit` in `getByStatus`. These are required methods; there is deliberately no fallback that loads the full queue. Use indexed queries/aggregates and limit before materializing records. Ordering remains `createdAt`, then `sequence`, then `id`, including when due retries compete with pending work.

@@ -14,6 +14,7 @@ import '../limits/rate_limit.dart';
 import '../registry/task_handler.dart';
 import '../registry/task_registry.dart';
 import '../retry/retry_policy.dart';
+import '../schedule/recurring.dart';
 import '../storage/queue_storage.dart';
 import '../task/dependency_failure_policy.dart';
 import '../task/durable_task.dart';
@@ -187,6 +188,7 @@ final class DurableQueue {
   final StreamController<QueueStorageFailure> _storageErrors =
       StreamController<QueueStorageFailure>.broadcast();
   final Set<String> _cancelRequested = {};
+  late final RecurringScheduler _recurring = RecurringScheduler(this);
 
   /// Running tasks whose handler was asked to stop because of a hold. They
   /// go back to the queue when the handler stops, even if released since.
@@ -232,6 +234,9 @@ final class DurableQueue {
   /// starting the worker. An outage holds serialized storage operations and
   /// may delay pause, stop, enqueue, cancellation, and queries until recovery.
   Stream<QueueStorageFailure> get storageErrors => _storageErrors.stream;
+
+  /// The clock the queue uses for every time it stores or reports.
+  QueueClock get clock => _clock;
 
   /// Registers the handler for [type].
   ///
@@ -518,6 +523,66 @@ final class DurableQueue {
     if (_runState == QueueRunState.running) unawaited(_pump());
     return ids;
   }
+
+  /// Runs a task every [every], for example a sync every six hours, and
+  /// returns the id of the occurrence now stored.
+  ///
+  /// Call it on every launch, after registering the task's type, like
+  /// [register]. One occurrence of [name] is stored at a time: each is a
+  /// normal task, built by [task], with [retryPolicy] and [priority]. When
+  /// it completes, fails, or is cancelled, the next one is stored for the
+  /// next slot. Slots are [every] apart, starting at [firstRunAt], or now
+  /// for a schedule that has never run.
+  ///
+  /// The queue only runs while the app runs. If slots were missed, for
+  /// example while the app was closed, the task runs once as soon as
+  /// possible and then continues on the original slots; missed runs are
+  /// not repeated. A crash between one occurrence finishing and the next
+  /// being stored is repaired by the next call to [schedule].
+  ///
+  /// Occurrences are in the group `schedule:<name>`, so
+  /// `getTasks(group: 'schedule:<name>')` shows the history, and their
+  /// deduplication key is the same. Each has an idempotency key naming its
+  /// slot, `schedule:<name>@<UTC time>`, which a handler can send to a
+  /// server. Finished occurrences stay stored until purged; purging them
+  /// all makes the next occurrence run at once.
+  ///
+  /// Throws [ArgumentError] if [name] is blank or [every] is shorter than
+  /// one second, [StateError] if [name] was already scheduled by this
+  /// queue, and what [enqueue] throws.
+  Future<String> schedule(
+    String name, {
+    required Duration every,
+    required DurableTask Function() task,
+    DateTime? firstRunAt,
+    RetryPolicy? retryPolicy,
+    int priority = 0,
+  }) {
+    _ensureOpen();
+    return _recurring.add(
+      name,
+      every: every,
+      task: task,
+      firstRunAt: firstRunAt,
+      retryPolicy: retryPolicy,
+      priority: priority,
+    );
+  }
+
+  /// Stops the schedule [name]: no further occurrences are stored, and one
+  /// that has not started is cancelled. A running occurrence finishes.
+  /// Returns whether an occurrence was cancelled.
+  ///
+  /// Works for a schedule added on an earlier launch too. Remove the
+  /// [schedule] call from the app as well, or the next launch starts it
+  /// again.
+  Future<bool> unschedule(String name) {
+    _ensureOpen();
+    return _recurring.remove(name);
+  }
+
+  /// Names passed to [schedule] on this queue, and not unscheduled.
+  Set<String> get schedules => _recurring.names;
 
   _EnqueueRequest _prepare(
     DurableTask task, {
@@ -1571,6 +1636,7 @@ final class DurableQueue {
     for (final entry in _gates.values) {
       await entry.subscription?.cancel();
     }
+    await _recurring.close();
     await _events.close();
     await _holdChanges.close();
     await _storageErrors.close();
@@ -1578,6 +1644,7 @@ final class DurableQueue {
 
   void _ensureOpen() {
     if (_closed) throw StateError('DurableQueue is closed');
+    if (_storage case final QueueStorageCallGuard guard) guard.checkCall();
   }
 
   /// Checks [dependsOn] for a task with [taskId] and [policy].

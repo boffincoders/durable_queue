@@ -10,6 +10,7 @@ environment:
 workspace:
   - packages/durable_queue
   - packages/durable_queue_dio
+  - packages/durable_queue_drift
   - packages/durable_queue_encryption
   - packages/durable_queue_hive
   - packages/durable_queue_sqlite

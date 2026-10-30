@@ -115,6 +115,10 @@ const packages = [
     'Hive storage on hive_ce, for apps that already use Hive.',
   ),
   Package(
+    'durable_queue_drift',
+    'drift storage, inside the drift database your app already has.',
+  ),
+  Package(
     'durable_queue_encryption',
     'Encrypts stored payloads and error messages with AES-256-GCM. Wraps any '
         'storage.',

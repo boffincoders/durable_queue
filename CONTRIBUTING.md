@@ -25,6 +25,7 @@ The repository is a Dart pub workspace. Each published package lives in `package
 | `packages/durable_queue_dio` | Dio integration |
 | `packages/durable_queue_sqlite` | SQLite storage |
 | `packages/durable_queue_hive` | Hive storage on `hive_ce`, pure Dart |
+| `packages/durable_queue_drift` | drift storage, in the app's drift database |
 | `packages/durable_queue_encryption` | Encryption at rest for any storage, pure Dart |
 | `packages/durable_queue_test_support` | Shared test helpers, including the storage contract suite. Not published. |
 | `packages/durable_queue_connectivity` | Network gate for Flutter. Needs the Flutter SDK, so it is not part of the workspace: run `flutter pub get` inside its folder. |
@@ -67,7 +68,7 @@ Adapters are separate packages (for example `durable_queue_<backend>`). To build
 
 1. Implement `QueueStorage` following [STORAGE.md](packages/durable_queue/STORAGE.md).
 2. Run `queueStorageContractTests` from `packages/durable_queue_test_support` against your adapter: add it as a `path` dev dependency inside this repository, or copy `lib/src/storage_contract.dart` elsewhere.
-3. Use `packages/durable_queue_sqlite` (database), `packages/durable_queue_hive` (key-value store), or `packages/durable_queue/example/json_file_storage.dart` (file) as a working reference.
+3. Use `packages/durable_queue_sqlite` (database), `packages/durable_queue_drift` (an app's existing database), `packages/durable_queue_hive` (key-value store), or `packages/durable_queue/example/json_file_storage.dart` (file) as a working reference.
 4. Announce it in Discussions so it can be listed in the README.
 
 ## License

@@ -93,3 +93,20 @@ abstract interface class QueueStorage {
   /// Removes [id]. Does nothing when [id] is not stored.
   Future<void> delete(String id);
 }
+
+/// Optional for a [QueueStorage]: lets it refuse a call before the queue
+/// waits for other work.
+///
+/// `DurableQueue` calls [checkCall] at the start of each public method, in
+/// the caller's zone, before it waits for work already in progress. A
+/// storage whose database can be locked by the caller, for example by an
+/// open transaction, throws there instead of letting the call wait for a
+/// queue operation that in turn waits for the caller's lock.
+///
+/// A storage that wraps another one should implement it and forward the
+/// call when the wrapped storage implements it.
+abstract interface class QueueStorageCallGuard {
+  /// Throws, typically a [StateError], if the queue must not be called from
+  /// the current context.
+  void checkCall();
+}
