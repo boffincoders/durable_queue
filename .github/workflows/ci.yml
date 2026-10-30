@@ -136,6 +136,30 @@ jobs:
       - run: dart run example/main.dart
       - run: dart pub publish --dry-run
 
+  durable_queue_drift:
+    name: durable_queue_drift (${{ matrix.os }}, Dart ${{ matrix.sdk }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        sdk: ['3.13.0', stable]
+    defaults:
+      run:
+        working-directory: packages/durable_queue_drift
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: ${{ matrix.sdk }}
+      - run: dart pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: dart analyze --fatal-infos
+      # Native SQLite through drift; also opens the same file with
+      # durable_queue_sqlite.
+      - run: dart test
+      - run: dart run example/main.dart
+      - run: dart pub publish --dry-run
+
   durable_queue_test_support:
     name: durable_queue_test_support
     runs-on: ubuntu-latest
