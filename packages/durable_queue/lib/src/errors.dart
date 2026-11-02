@@ -120,6 +120,42 @@ final class TaskExpiredException implements Exception {
       '${expiresAt.toIso8601String()} before it could start';
 }
 
+/// Recorded when a task was enqueued by a newer version of the app than the
+/// one running, so its payload has a version this app does not know (see
+/// `DurableQueue.register(version:)`).
+///
+/// The queue does not throw this to application code. The task is not run;
+/// it is checked again after an hour, without using an attempt, so an
+/// updated app runs it. The error is stored as its [TaskFailure].
+final class TaskVersionException implements Exception {
+  /// Creates a record for [taskId].
+  const TaskVersionException({
+    required this.taskId,
+    required this.taskType,
+    required this.storedVersion,
+    required this.registeredVersion,
+  });
+
+  /// The task that was not run.
+  final String taskId;
+
+  /// Its type.
+  final String taskType;
+
+  /// The payload version the task was stored with.
+  final int storedVersion;
+
+  /// The version this app registered for the type.
+  final int registeredVersion;
+
+  @override
+  String toString() =>
+      'TaskVersionException: task "$taskId" of type "$taskType" was stored '
+      'with payload version $storedVersion, but this app registers version '
+      '$registeredVersion. It runs once an app that knows version '
+      '$storedVersion starts the queue.';
+}
+
 /// A worker storage operation failed and will be retried.
 ///
 /// Delivered as a value on `DurableQueue.storageErrors`. The original error is

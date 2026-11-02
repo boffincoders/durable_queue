@@ -16,6 +16,8 @@ Since 0.5.8 it also includes `expiresAt` (nullable timestamp), after which a tas
 
 Since 0.5.9 it also includes `held` (bool, default false) and `releaseAt` (nullable timestamp), set by `DurableQueue.hold`. A held task that is not running has `nextAttemptAt` set to `StoredTask.heldNextAttemptAt` (the year 9999), so `getNextReady` never returns it and adapters need no special query. Store that time exactly; the queue treats a wake time at or after it as "nothing scheduled". Records written earlier have neither field and are not held. Adapters that store the `toJson` record need no change.
 
+Since 0.5.11 it also includes `payloadVersion` (int, default 1) and `failures` (a list of failure records, default empty). Records written earlier have neither and load as version 1 with no history. Adapters that store the `toJson` record need no change; an adapter that encrypts or redacts `lastFailure` must treat every entry of `failures` the same way.
+
 The payload is whatever the application put in `DurableTask.toJson`. Treat it as sensitive. This package does not encrypt it; `durable_queue_encryption` wraps any adapter and encrypts it before the adapter sees it.
 
 ## Methods

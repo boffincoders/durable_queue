@@ -83,6 +83,35 @@ void main() {
     expect(record.status, TaskStatus.retryScheduled);
   });
 
+  test('the failure history is encrypted too', () async {
+    final earlier = TaskFailure(
+      error: 'password=hunter2 rejected',
+      stackTrace: '#0 loginSecretly (auth.dart:9)',
+      failedAt: DateTime.utc(2025, 12, 31),
+      attempt: 1,
+    );
+    final task = _secretTask('h').copyWith(failures: [earlier, _failure]);
+    await storage.save(task);
+    final raw = await rawJson('h');
+    for (final secret in ['hunter2', 'loginSecretly', 'token=abc123']) {
+      expect(raw.contains(secret), isFalse, reason: secret);
+    }
+    final record = (await inner.get('h'))!;
+    expect(record.failures.map((f) => f.error), [
+      EncryptedQueueStorage.redactedError,
+      EncryptedQueueStorage.redactedError,
+    ]);
+    expect(record.failures.first.attempt, 1);
+
+    final read = (await storage.get('h'))!;
+    expect(read.failures.map((f) => f.error), [
+      'password=hunter2 rejected',
+      _failure.error,
+    ]);
+    expect(read.failures.first.stackTrace, '#0 loginSecretly (auth.dart:9)');
+    expect(read.failures.first.failedAt, DateTime.utc(2025, 12, 31));
+  });
+
   test('reading returns the original task', () async {
     final task = _secretTask('a');
     await storage.save(task);

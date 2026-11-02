@@ -102,7 +102,9 @@ final class DurableQueue {
   /// UUID v4 string. [storageRetryDelay] must be positive and defaults to one
   /// second; worker storage errors are reported through [storageErrors].
   /// [gateRecheckInterval] and [gateErrorDelay] must be positive; see their
-  /// documentation.
+  /// documentation. [failureHistory] is how many failures each task keeps in
+  /// [StoredTask.failures], from 0 (the default: only
+  /// [StoredTask.lastFailure]) to 20.
   DurableQueue({
     required QueueStorage storage,
     QueueClock? clock,
@@ -110,6 +112,7 @@ final class DurableQueue {
     this.storageRetryDelay = const Duration(seconds: 1),
     this.gateRecheckInterval = const Duration(minutes: 5),
     this.gateErrorDelay = const Duration(seconds: 30),
+    this.failureHistory = 0,
     RandomFraction? randomFraction,
     TaskIdGenerator? idGenerator,
   }) : _storage = storage,
@@ -144,7 +147,25 @@ final class DurableQueue {
         'Must be at least 1',
       );
     }
+    if (failureHistory < 0 || failureHistory > 20) {
+      throw ArgumentError.value(
+        failureHistory,
+        'failureHistory',
+        'Must be from 0 to 20',
+      );
+    }
   }
+
+  /// How many failures each task keeps in [StoredTask.failures]; 0 keeps
+  /// only [StoredTask.lastFailure].
+  ///
+  /// With `durable_queue_encryption`, use 0.1.2 or later before setting it:
+  /// earlier versions do not encrypt the history.
+  final int failureHistory;
+
+  /// How long a task stored by a newer app version waits before it is
+  /// checked again. See [TaskVersionException].
+  static const newerVersionRecheck = Duration(hours: 1);
 
   /// Storage this queue reads and writes.
   final QueueStorage _storage;
@@ -268,9 +289,21 @@ final class DurableQueue {
   /// listens for cancellation can stop. Time a transfer spends handed off to the operating system does
   /// not count.
   ///
+  /// [version] is the version of this type's payload, starting at 1. Raise
+  /// it when [decoder] changes in a way that cannot read payloads stored by
+  /// an earlier release of the app, and pass [migrate] to convert those:
+  /// each task records the version it was enqueued with
+  /// ([StoredTask.payloadVersion]), and before an attempt of an older task
+  /// the queue passes its payload through [migrate], then [decoder]. A
+  /// migration that throws fails the task at once, like a payload that
+  /// cannot be decoded. A task stored with a version newer than [version],
+  /// by a later release, is not run: it waits, without using attempts, until
+  /// an app that knows its version runs the queue (see
+  /// [TaskVersionException]).
+  ///
   /// Throws [ArgumentError] if a gate in [requires] has not been added, if
-  /// [deferOn] is given without [requires], or if [timeout] is not
-  /// positive.
+  /// [deferOn] is given without [requires], if [timeout] is not positive,
+  /// or if [version] is less than 1.
   void register<T extends DurableTask>({
     required String type,
     required TaskDecoder<T> decoder,
@@ -281,6 +314,8 @@ final class DurableQueue {
     RateLimit? rateLimit,
     DeferOnError? deferOn,
     Duration? timeout,
+    int version = 1,
+    TaskMigration? migrate,
   }) {
     _ensureOpen();
     for (final gate in requires) {
@@ -309,6 +344,8 @@ final class DurableQueue {
       rateLimit: rateLimit,
       deferOn: deferOn,
       timeout: timeout,
+      version: version,
+      migrate: migrate,
     );
     if (rateLimit != null) _typeLimiters[type] = RateLimiter(rateLimit);
   }
@@ -608,10 +645,10 @@ final class DurableQueue {
     for (final dependency in dependencies) {
       _rejectBlank(dependency, 'dependsOn');
     }
-    if (!_registry.contains(task.type)) {
-      throw _registry.unknownType(task.type);
-    }
+    final registration = _registry.find(task.type);
+    if (registration == null) throw _registry.unknownType(task.type);
     return _EnqueueRequest(
+      payloadVersion: registration.version,
       type: task.type,
       payload: _jsonPayload(task.toJson()),
       retryPolicy: retryPolicy ?? RetryPolicy.none(),
@@ -707,11 +744,12 @@ final class DurableQueue {
         group: request.group,
         nextAttemptAt: request.runAt,
         expiresAt: request.expiresAt,
+        payloadVersion: request.payloadVersion,
       ),
       verdict,
       now,
     );
-    await _storage.save(stored.task);
+    await _storage.save(_withHistory(stored.task));
     events.add(
       TaskEnqueued(
         taskId: id,
@@ -1752,11 +1790,33 @@ final class DurableQueue {
         ? await _planDependents(root.task.id, root.task.status, io)
         : const <_Resolved>[];
     for (final step in cascade.reversed) {
-      await io(() => _storage.update(_unheldIfFinished(step.task)), 'update');
+      final task = _withHistory(_unheldIfFinished(step.task));
+      await io(() => _storage.update(task), 'update');
     }
-    await io(() => _storage.update(_unheldIfFinished(root.task)), 'update');
+    final task = _withHistory(_unheldIfFinished(root.task));
+    await io(() => _storage.update(task), 'update');
     return [?root.event, for (final step in cascade) ?step.event];
   }
+
+  /// Keeps [StoredTask.failures] ending with the current last failure, up to
+  /// [failureHistory] entries.
+  StoredTask _withHistory(StoredTask task) {
+    final failure = task.lastFailure;
+    if (failureHistory == 0) {
+      return task.failures.isEmpty ? task : task.copyWith(failures: const []);
+    }
+    if (failure == null) return task;
+    final history = task.failures;
+    if (history.isNotEmpty && _sameFailure(history.last, failure)) return task;
+    final next = [...history, failure];
+    final start = next.length > failureHistory
+        ? next.length - failureHistory
+        : 0;
+    return task.copyWith(failures: next.sublist(start));
+  }
+
+  static bool _sameFailure(TaskFailure a, TaskFailure b) =>
+      a.failedAt == b.failedAt && a.attempt == b.attempt && a.error == b.error;
 
   /// Finished tasks are never held.
   static StoredTask _unheldIfFinished(StoredTask task) {
@@ -1956,6 +2016,26 @@ final class DurableQueue {
     );
     if (task == null) return null;
     final now = _clock.now();
+    final registered = _registry.find(task.type)?.version;
+    if (registered != null && task.payloadVersion > registered) {
+      final wait = task.copyWith(
+        updatedAt: now,
+        nextAttemptAt: now.add(newerVersionRecheck),
+        lastFailure: TaskFailure(
+          error: TaskVersionException(
+            taskId: task.id,
+            taskType: task.type,
+            storedVersion: task.payloadVersion,
+            registeredVersion: registered,
+          ).toString(),
+          stackTrace: null,
+          failedAt: now,
+          attempt: task.attempts,
+        ),
+      );
+      await _retryStorage(() => _storage.update(_withHistory(wait)), 'update');
+      return const _Claim.expired([]);
+    }
     if (_isExpired(task, now)) {
       _reservations.remove(task.id);
       return _Claim.expired(await _commit(_expired(task, now), _retryStorage));
@@ -2212,7 +2292,7 @@ final class DurableQueue {
 
     final DurableTask decoded;
     try {
-      decoded = registration.decode(_jsonPayload(claimed.payload));
+      decoded = registration.decode(_migrated(claimed, registration));
       if (decoded.type != claimed.type) {
         throw TaskDecodeException(
           'Decoded task type "${decoded.type}" does not match stored type '
@@ -2313,6 +2393,25 @@ final class DurableQueue {
       },
     );
     return result.future;
+  }
+
+  /// [claimed]'s payload in the shape its registered version expects.
+  Map<String, dynamic> _migrated(
+    StoredTask claimed,
+    RegisteredTask registration,
+  ) {
+    final json = _jsonPayload(claimed.payload);
+    final from = claimed.payloadVersion;
+    final migrate = registration.migrate;
+    if (from >= registration.version || migrate == null) return json;
+    try {
+      return _jsonPayload(migrate(from, json));
+    } on Object catch (error) {
+      throw TaskDecodeException(
+        'Migrating task "${claimed.id}" of type "${claimed.type}" from '
+        'version $from to ${registration.version} failed: $error',
+      );
+    }
   }
 
   /// Records a hand-off made while [claimed]'s handler runs, and saves the
@@ -2898,6 +2997,7 @@ final class _Transition {
 
 final class _EnqueueRequest {
   _EnqueueRequest({
+    required this.payloadVersion,
     required this.type,
     required this.payload,
     required this.retryPolicy,
@@ -2922,6 +3022,7 @@ final class _EnqueueRequest {
   final String? group;
   final DateTime? runAt;
   final DateTime? expiresAt;
+  final int payloadVersion;
 
   _EnqueueRequest withDependencies(List<String> dependencies) {
     return _EnqueueRequest(
@@ -2936,6 +3037,7 @@ final class _EnqueueRequest {
       group: group,
       runAt: runAt,
       expiresAt: expiresAt,
+      payloadVersion: payloadVersion,
     );
   }
 }

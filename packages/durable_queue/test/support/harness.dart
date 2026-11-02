@@ -43,6 +43,7 @@ final class QueueHarness {
     int maxConcurrentTasks = 1,
     double Function()? randomFraction,
     String Function()? idGenerator,
+    int failureHistory = 0,
   }) : storage = storage ?? MemoryQueueStorage(),
        clock = clock ?? FakeQueueClock(DateTime.utc(2026, 1, 1)) {
     queue = DurableQueue(
@@ -51,6 +52,7 @@ final class QueueHarness {
       maxConcurrentTasks: maxConcurrentTasks,
       randomFraction: randomFraction ?? () => 0.5,
       idGenerator: idGenerator,
+      failureHistory: failureHistory,
     );
     queue.events.listen(events.add);
   }
@@ -70,6 +72,8 @@ final class QueueHarness {
     RateLimit? rateLimit,
     DeferOnError? deferOn,
     Duration? timeout,
+    int version = 1,
+    TaskMigration? migrate,
   }) {
     queue.register<ValueTask>(
       type: type,
@@ -81,6 +85,8 @@ final class QueueHarness {
       rateLimit: rateLimit,
       deferOn: deferOn,
       timeout: timeout,
+      version: version,
+      migrate: migrate,
     );
   }
 

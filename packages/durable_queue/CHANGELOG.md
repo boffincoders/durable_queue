@@ -1,3 +1,21 @@
+## 0.5.11
+
+New features, no breaking changes. Storage adapters must persist the new
+`StoredTask.payloadVersion` and `StoredTask.failures` fields (see
+STORAGE.md); adapters that store the `toJson` record, like
+`durable_queue_sqlite`, `durable_queue_drift`, and `durable_queue_hive`,
+need no change.
+
+* Task versions: `register(version:, migrate:)`. Each task records the
+  version it was enqueued with (`StoredTask.payloadVersion`); an older
+  task's payload goes through `migrate` before the decoder. A migration
+  that throws fails the task at once. A task stored by a newer app version
+  waits, without using attempts, until an app that knows that version runs
+  it (`TaskVersionException`).
+* Failure history: `DurableQueue(failureHistory:)` keeps up to that many
+  failures per task in `StoredTask.failures`. Off by default.
+* README: the dead-letter queue, with examples.
+
 ## 0.5.10
 
 New features, no breaking changes.

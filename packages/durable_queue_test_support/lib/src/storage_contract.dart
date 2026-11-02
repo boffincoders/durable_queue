@@ -397,4 +397,33 @@ void queueStorageContractTests(FutureOr<QueueStorage> Function() create) {
     expect(released.releaseAt, isNull);
     expect((await storage.getNextReady(DateTime.utc(2026)))?.id, 'a');
   });
+
+  test('payload version and failure history persist', () async {
+    final first = TaskFailure(
+      error: 'first',
+      stackTrace: null,
+      failedAt: DateTime.utc(2026, 1, 1),
+      attempt: 1,
+    );
+    final second = TaskFailure(
+      error: 'second',
+      stackTrace: 'trace',
+      failedAt: DateTime.utc(2026, 1, 2),
+      attempt: 2,
+    );
+    await storage.save(
+      storedTask(
+        id: 'a',
+        lastFailure: second,
+      ).copyWith(payloadVersion: 3, failures: [first, second]),
+    );
+    final loaded = (await storage.get('a'))!;
+    expect(loaded.payloadVersion, 3);
+    expect(loaded.failures.map((f) => f.error), ['first', 'second']);
+    expect(loaded.failures.last.stackTrace, 'trace');
+    expect(loaded.failures.first.failedAt, DateTime.utc(2026, 1, 1));
+    await storage.update(loaded.copyWith(failures: const []));
+    expect((await storage.get('a'))!.failures, isEmpty);
+    expect((await storage.get('a'))!.payloadVersion, 3);
+  });
 }

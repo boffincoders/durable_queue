@@ -198,6 +198,11 @@ final class EncryptedQueueStorage
       if (failure != null) 'stackTrace': failure.stackTrace,
       if (hideKeys && dedup != null) 'deduplicationKey': dedup,
       if (hideKeys && group != null) 'group': group,
+      if (task.failures.isNotEmpty)
+        'failures': [
+          for (final earlier in task.failures)
+            {'error': earlier.error, 'stackTrace': earlier.stackTrace},
+        ],
     };
     final String plaintext;
     try {
@@ -227,6 +232,15 @@ final class EncryptedQueueStorage
               failedAt: failure.failedAt,
               attempt: failure.attempt,
             ),
+      failures: [
+        for (final earlier in task.failures)
+          TaskFailure(
+            error: redactedError,
+            stackTrace: null,
+            failedAt: earlier.failedAt,
+            attempt: earlier.attempt,
+          ),
+      ],
       deduplicationKey: hideKeys && dedup != null
           ? '$_tagPrefix${_cipher.lookupTags(dedup).first}'
           : dedup,
@@ -278,7 +292,21 @@ final class EncryptedQueueStorage
       );
     }
     final failure = stored.lastFailure;
+    final secretFailures = secret['failures'] as List<dynamic>? ?? const [];
     return stored.copyWith(
+      failures: [
+        for (var i = 0; i < stored.failures.length; i++)
+          TaskFailure(
+            error: i < secretFailures.length
+                ? (secretFailures[i] as Map)['error'] as String
+                : stored.failures[i].error,
+            stackTrace: i < secretFailures.length
+                ? (secretFailures[i] as Map)['stackTrace'] as String?
+                : stored.failures[i].stackTrace,
+            failedAt: stored.failures[i].failedAt,
+            attempt: stored.failures[i].attempt,
+          ),
+      ],
       payload: secret['payload'] as Map<String, dynamic>,
       lastFailure: failure == null
           ? null

@@ -42,8 +42,18 @@ final class StoredTask {
     this.expiresAt,
     this.held = false,
     this.releaseAt,
+    this.payloadVersion = 1,
+    Iterable<TaskFailure> failures = const [],
   }) : payload = _freezeMap(payload),
-       dependsOn = List<String>.unmodifiable(LinkedHashSet.of(dependsOn)) {
+       dependsOn = List<String>.unmodifiable(LinkedHashSet.of(dependsOn)),
+       failures = List<TaskFailure>.unmodifiable(failures) {
+    if (payloadVersion < 1) {
+      throw ArgumentError.value(
+        payloadVersion,
+        'payloadVersion',
+        'Must be at least 1',
+      );
+    }
     if (id.isEmpty) {
       throw ArgumentError.value(id, 'id', 'Must not be empty');
     }
@@ -182,6 +192,20 @@ final class StoredTask {
   /// time from before the hold, or null for at once.
   final DateTime? releaseAt;
 
+  /// The version of the task type's payload when the task was enqueued, set
+  /// from `DurableQueue.register(version:)`. Records written before 0.5.11
+  /// are version 1.
+  ///
+  /// [payload] keeps this shape; `register(migrate:)` converts it to the
+  /// current one before each attempt.
+  final int payloadVersion;
+
+  /// Earlier failures, oldest first, ending with [lastFailure] while that is
+  /// set. Kept only when the queue was created with
+  /// `DurableQueue(failureHistory:)` greater than zero, and limited to that
+  /// many; otherwise empty.
+  final List<TaskFailure> failures;
+
   /// The [nextAttemptAt] of a held task that is not running: far enough in
   /// the future that storage never selects it. The queue does not wake for
   /// it.
@@ -216,6 +240,8 @@ final class StoredTask {
     Object? expiresAt = _unset,
     bool? held,
     Object? releaseAt = _unset,
+    int? payloadVersion,
+    Iterable<TaskFailure>? failures,
   }) {
     return StoredTask(
       id: id ?? this.id,
@@ -254,6 +280,8 @@ final class StoredTask {
       releaseAt: identical(releaseAt, _unset)
           ? this.releaseAt
           : releaseAt as DateTime?,
+      payloadVersion: payloadVersion ?? this.payloadVersion,
+      failures: failures ?? this.failures,
     );
   }
 
@@ -281,6 +309,8 @@ final class StoredTask {
     'expiresAt': expiresAt?.toIso8601String(),
     'held': held,
     'releaseAt': releaseAt?.toIso8601String(),
+    'payloadVersion': payloadVersion,
+    'failures': [for (final failure in failures) failure.toJson()],
   };
 
   /// Restores a record produced by [toJson].
@@ -291,7 +321,8 @@ final class StoredTask {
   /// written before 0.5.4 have no `handOffReference` and load without one.
   /// Records written before 0.5.8 have no `expiresAt` and never expire.
   /// Records written before 0.5.9 have no `held` or `releaseAt` and are not
-  /// held.
+  /// held. Records written before 0.5.11 have no `payloadVersion` or
+  /// `failures` and load as version 1 with no failure history.
   factory StoredTask.fromJson(Map<String, dynamic> json) {
     final statusName = _requireString(json, 'status');
     final status = TaskStatus.values.where((value) => value.name == statusName);
@@ -328,6 +359,8 @@ final class StoredTask {
       expiresAt: _optionalDateTime(json, 'expiresAt'),
       held: _optionalBool(json, 'held') ?? false,
       releaseAt: _optionalDateTime(json, 'releaseAt'),
+      payloadVersion: _optionalInt(json, 'payloadVersion') ?? 1,
+      failures: _failures(json),
     );
   }
 
@@ -401,6 +434,18 @@ bool _requireBool(Map<String, dynamic> json, String key) {
   final value = json[key];
   if (value is bool) return value;
   throw FormatException('StoredTask.$key must be a bool');
+}
+
+List<TaskFailure> _failures(Map<String, dynamic> json) {
+  final value = json['failures'];
+  if (value == null) return const [];
+  if (value is! List) {
+    throw const FormatException('StoredTask.failures must be a list or null');
+  }
+  return [
+    for (final item in value)
+      TaskFailure.fromJson(_requireObject(item, 'failures')),
+  ];
 }
 
 bool? _optionalBool(Map<String, dynamic> json, String key) {

@@ -1,3 +1,10 @@
+## 0.1.2
+
+* Encrypts the failure history (`StoredTask.failures`, from
+  `DurableQueue(failureHistory:)`) like the last failure: each stored error
+  reads `[encrypted]`, and the originals are restored on read.
+* Requires `durable_queue` 0.5.11 or later.
+
 ## 0.1.1
 
 * Passes `QueueStorageCallGuard` checks on to the wrapped storage, so

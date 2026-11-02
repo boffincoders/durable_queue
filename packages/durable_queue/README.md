@@ -23,6 +23,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 ## Features
 
 * Tasks are data, so they can be stored and rebuilt after a restart
+* Task versions: tasks stored by an older app release are migrated after an update
 * Fixed and exponential retry with optional jitter, and a `retryIf` filter
 * Concurrency limits and priorities
 * Scheduled tasks: start at a given time or after a delay
@@ -37,6 +38,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * `drain`: run what is ready within a time limit, for background jobs
 * Hand-off: a task can wait for work the operating system finishes, such as a background upload
 * Lifecycle events, queries by status or group, counts per status, and `waitFor` one task
+* A dead-letter queue: failed tasks stay stored with their errors until you retry or remove them
 * Ready-made metrics (counts, success rate, run and wait times per task type) and logging
 * Startup recovery of tasks interrupted by a crash
 * An injectable clock, so retry logic is testable without waiting
@@ -209,6 +211,31 @@ Every state change is written to storage before the matching event is emitted. O
 A task is a JSON payload plus a type name, like `UploadPhotoTask` above. The queue stores `toJson()`, never a closure, and rebuilds the task with the registered decoder. Register each type before enqueuing it; the `type` passed to `register` must match the task's `type` getter.
 
 The handler's `context` carries the task id, attempt number, attempt budget, idempotency key, and whether cancellation was requested. Handlers that do not need it can ignore it.
+
+### Changing a task's payload: versions and migration
+
+Tasks can wait in storage across app updates. When a new release changes what a task's payload looks like, give the type a `version` and a `migrate` function, so tasks stored by an older release still run:
+
+```dart
+// Release 1 stored {'path': '/photo.jpg'}.
+// Release 2 reads {'filePath': ..., 'compress': ...}.
+queue.register<UploadPhotoTask>(
+  type: 'upload_photo',
+  version: 2,
+  migrate: (fromVersion, json) => switch (fromVersion) {
+    1 => {'filePath': json['path'], 'compress': true},
+    _ => json,
+  },
+  decoder: UploadPhotoTask.fromJson,
+  handler: uploadPhoto,
+);
+```
+
+Each task records the version it was enqueued with (`StoredTask.payloadVersion`; 1 for tasks stored before versions existed). Before an attempt of an older task, its payload goes through `migrate`, then the decoder; the stored payload itself is not rewritten. Handle every older version in the one function, for example with a `switch` as above. A migration that throws fails the task at once, like a payload that cannot be decoded, with an error naming both versions.
+
+A task stored by a newer release than the one running, for example after a user installed an older build, is not run with code that cannot read it. It waits without using attempts, checked again every hour, until an app that knows its version runs the queue. Its `lastFailure` holds a `TaskVersionException` saying why.
+
+Only raise `version` for changes the decoder cannot handle. Adding an optional field with a default needs no new version.
 
 ## Retry
 
@@ -510,11 +537,32 @@ final removed = await queue.purge(
 );
 ```
 
-Failed tasks are the queue's dead-letter queue: they stay stored, with their last error in `lastFailure`, until you retry, delete, or purge them. To retry them all at once, for example after a server outage:
+### The dead-letter queue
+
+Failed tasks are the queue's dead-letter queue. A task whose attempts run out, or whose error `retryIf` rejects, becomes `failed` and stays stored, with its last error in `lastFailure`, until you retry, delete, or purge it:
 
 ```dart
+// Inspect them, for example on a support screen.
+final dead = await queue.getTasks(status: TaskStatus.failed);
+for (final task in dead) {
+  print('${task.type} ${task.id}: ${task.lastFailure?.error}');
+}
+
+// Retry one, or all of them after a server outage.
+await queue.retry(dead.first.id);
 final retried = await queue.retryFailed(); // or retryFailed(group: 'uploads')
+
+// Or drop old ones.
+await queue.purge(statuses: {TaskStatus.failed}, olderThan: Duration(days: 30));
 ```
+
+To keep the errors of earlier attempts as well, create the queue with `failureHistory`:
+
+```dart
+final queue = DurableQueue(storage: storage, failureHistory: 5);
+```
+
+Each task then keeps up to that many failures in `StoredTask.failures`, oldest first: the error, stack trace, time, and attempt number of each. The history is stored with the task, so it survives restarts and a `retry`. It is off by default. With `durable_queue_encryption`, use 0.1.2 or later, which encrypts the history too.
 
 `retry` keeps the task id, payload, keys, priority, group, and dependencies, and can take a new `retryPolicy`. It refuses tasks that are still active, refuses when another active task already holds the same deduplication key, and refuses when a dependency did not complete (retry that dependency first). Tasks cancelled because a dependency failed are not revived automatically. `delete` and `purge` only touch terminal tasks, and never remove a task that a waiting task still depends on.
 

@@ -46,3 +46,18 @@ typedef RetryDelayResolver = Duration? Function(
 /// The returned gate must be one of the task type's `requires`; any other
 /// value is ignored. A function that throws is treated as returning null.
 typedef DeferOnError = String? Function(Object error, StackTrace stackTrace);
+
+/// Converts a payload stored by an earlier version of a task type to the
+/// current shape, for `DurableQueue.register(migrate:)`.
+///
+/// [fromVersion] is the version the task was enqueued with, lower than the
+/// registered version. Return the payload as the current decoder expects
+/// it. Handle every older version in one function, for example with a
+/// `switch` on [fromVersion], or step through versions one at a time.
+///
+/// A migration that throws fails the task like a payload that cannot be
+/// decoded: at once, without a retry.
+typedef TaskMigration = Map<String, dynamic> Function(
+  int fromVersion,
+  Map<String, dynamic> json,
+);

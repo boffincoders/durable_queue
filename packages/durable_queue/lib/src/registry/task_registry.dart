@@ -18,6 +18,8 @@ final class RegisteredTask {
     required this.rateLimit,
     required this.deferOn,
     required this.timeout,
+    required this.version,
+    required this.migrate,
   });
 
   /// Registry key.
@@ -46,6 +48,12 @@ final class RegisteredTask {
 
   /// Optional limit on how long one attempt's handler may run.
   final Duration? timeout;
+
+  /// The current version of this type's payload.
+  final int version;
+
+  /// Converts a payload stored at an earlier [version], or null.
+  final TaskMigration? migrate;
 }
 
 /// Handlers keyed by task type.
@@ -75,9 +83,14 @@ final class TaskRegistry {
     RateLimit? rateLimit,
     DeferOnError? deferOn,
     Duration? timeout,
+    int version = 1,
+    TaskMigration? migrate,
   }) {
     if (type.isEmpty) {
       throw ArgumentError.value(type, 'type', 'Must not be empty');
+    }
+    if (version < 1) {
+      throw ArgumentError.value(version, 'version', 'Must be at least 1');
     }
     if (timeout != null && timeout <= Duration.zero) {
       throw ArgumentError.value(timeout, 'timeout', 'Must be positive');
@@ -95,6 +108,8 @@ final class TaskRegistry {
       rateLimit: rateLimit,
       deferOn: deferOn,
       timeout: timeout,
+      version: version,
+      migrate: migrate,
     );
   }
 

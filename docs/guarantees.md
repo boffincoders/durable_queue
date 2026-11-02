@@ -16,6 +16,8 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Recurring tasks.** A schedule keeps one occurrence stored at a time, so a crash or a second `schedule` call never doubles it. Slots missed while the app was closed run once, not once per missed slot. Like any task, an occurrence runs only while the queue runs.
 
+**App updates.** A task stored by an older release runs after an update: if its type's payload changed, the type's `migrate` function converts it first. A task stored by a newer release is never run by an older one; it waits until an app that knows its version runs.
+
 **Order.** Among tasks that are ready, higher `priority` starts first, then the oldest. With `maxConcurrentTasks: 1` tasks run one at a time in that order. With more than one slot, tasks can finish in any order; use `dependsOn` or `enqueueChain` when one must wait for another.
 
 **Dependencies.** A task never starts before every task it depends on has completed. If a dependency fails or is cancelled, `onDependencyFailure` decides: cancel (default), fail, or run anyway. A crash between a task finishing and its result being written never leaves its dependents waiting forever.
