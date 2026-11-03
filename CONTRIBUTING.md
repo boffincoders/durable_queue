@@ -4,7 +4,7 @@ Thanks for helping. `durable_queue` is a small execution engine, and the goal is
 
 ## Where to start
 
-* **Questions, ideas, and integration problems:** open a thread in [GitHub Discussions](https://github.com/boffincoders/durable_queue/discussions). Good topics: a storage backend you need, a workflow the queue cannot express yet, or an API that confused you.
+* **Questions, ideas, and integration problems:** open a thread in [GitHub Discussions](https://github.com/boffincoders/durable_queue/discussions). Good topics: a storage backend you need, a workflow the queue cannot express yet, or an API that confused you. The [roadmap](ROADMAP.md) lists what is planned and considered.
 * **Bugs:** open an [issue](https://github.com/boffincoders/durable_queue/issues) with the package version, Dart or Flutter version, a minimal reproduction, and what you expected.
 * **Security problems:** do not open an issue. Report them privately as described in [SECURITY.md](SECURITY.md).
 * **Larger changes:** start a discussion first, so the design can be agreed before you write code.

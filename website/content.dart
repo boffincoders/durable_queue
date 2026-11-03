@@ -251,6 +251,7 @@ final docPages = [
     section: 'Reference',
     title: 'Storage contract',
   ),
+  DocPage('ROADMAP.md', 'roadmap/', section: 'Reference', title: 'Roadmap'),
   DocPage(
     'CONTRIBUTING.md',
     'contributing/',

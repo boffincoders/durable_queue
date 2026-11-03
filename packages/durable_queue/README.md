@@ -49,7 +49,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.4
+  durable_queue: ^0.5.12
 ```
 
 ## Packages

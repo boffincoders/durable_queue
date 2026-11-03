@@ -92,12 +92,13 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 * [Cookbook](docs/cookbook.md): offline forms, ordered chat messages, upload then notify, rate-limited sync, background jobs, progress in the UI, failed work, and testing. Every recipe is a file that CI compiles.
 * [Benchmarks](docs/benchmarks.md): what storing, running, and recovering tasks costs with each storage, measured on GitHub's runners, with the method.
 * [Security policy](SECURITY.md): how to report a vulnerability privately, and what is stored in plain text.
+* [Roadmap](ROADMAP.md): what is available, what comes next, and what is only considered.
 
 ## Get started
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.7
+  durable_queue: ^0.5.12
 ```
 
 The [documentation site](https://boffincoders.github.io/durable_queue/) and the [`durable_queue` README](packages/durable_queue/README.md) have the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).
@@ -126,6 +127,7 @@ examples/
 website/                        the documentation site (built by website/build.dart)
 pubspec.yaml                    Dart pub workspace root (not published)
 CONTRIBUTING.md                 how to contribute
+ROADMAP.md                      what comes next
 ```
 
 ## Contributing and feedback
