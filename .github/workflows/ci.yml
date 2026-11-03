@@ -372,3 +372,23 @@ jobs:
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze --fatal-infos
       - run: flutter test
+
+  cookbook_stacks:
+    # Recipes with Firebase, Supabase, Riverpod, and Bloc, kept apart so
+    # their dependencies cannot break the core recipes.
+    name: cookbook_stacks (Flutter ${{ matrix.channel }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        channel: [stable]
+    defaults:
+      run:
+        working-directory: examples/cookbook_stacks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ matrix.channel }}
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze --fatal-infos

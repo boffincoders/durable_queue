@@ -13,7 +13,7 @@ Work such as uploads, messages, and sync is described as data, stored through a 
 
 Full videos on real phones: [iPhone](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo.mp4) (78 s) · [Android](https://github.com/boffincoders/durable_queue/blob/main/docs/media/durable_queue_demo_android.mp4) (103 s). Photos are queued, the app goes to the home screen, and every upload still reaches the server, including ones whose first try the server failed on purpose.
 
-**[▶ Watch the 10-minute explainer](https://youtu.be/6L7gFN60PmY)** on YouTube · **[Documentation site](https://boffincoders.github.io/durable_queue/)**: the guide, every package, the cookbook, guarantees, and benchmarks in one place.
+**[Quick start](docs/quickstart.md)**: a working offline outbox in five minutes · **[▶ Watch the 10-minute explainer](https://youtu.be/6L7gFN60PmY)** on YouTube · **[Documentation site](https://boffincoders.github.io/durable_queue/)**: the guide, every package, the cookbook, guarantees, and benchmarks in one place.
 
 ## Packages
 
@@ -121,6 +121,7 @@ benchmark/                      benchmarks behind docs/benchmarks.md
 docs/                           guarantees, cookbook, benchmarks, and media
 examples/
   cookbook/                     the cookbook's recipes, checked by CI (not published)
+  cookbook_stacks/              recipes with Firebase, Supabase, Riverpod, and Bloc (not published)
   durable_queue_demo/           demo app and kill tests (not published)
 website/                        the documentation site (built by website/build.dart)
 pubspec.yaml                    Dart pub workspace root (not published)

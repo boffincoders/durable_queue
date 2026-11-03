@@ -73,6 +73,8 @@ Need an integration that is not listed? Ask in [Discussions](https://github.com/
 
 ## Quick start
 
+For a complete Flutter app you can paste and run, with SQLite storage, offline waiting, and a live list of tasks, see the [quick start page](https://boffincoders.github.io/durable_queue/quickstart/). The core on its own:
+
 ```dart
 import 'package:durable_queue/durable_queue.dart';
 

@@ -1,0 +1,30 @@
+name: durable_queue_cookbook_stacks
+description: Recipes that use durable_queue with Firebase, Supabase, Riverpod, and Bloc. Checked by CI; see docs/cookbook.md.
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.0
+  flutter: ">=3.47.0"
+
+# Kept apart from examples/cookbook so these larger dependency trees cannot
+# break the core recipes.
+dependencies:
+  durable_queue: ^0.5.12
+  durable_queue_flutter: ^0.1.3
+  firebase_storage: ^14.0.0
+  flutter:
+    sdk: flutter
+  flutter_bloc: ^9.1.0
+  flutter_riverpod: ^3.0.0
+  supabase_flutter: ^2.18.0
+
+dev_dependencies:
+  lints: ^6.1.0
+
+# The recipes always use the code in this repository.
+dependency_overrides:
+  durable_queue:
+    path: ../../packages/durable_queue
+  durable_queue_flutter:
+    path: ../../packages/durable_queue_flutter

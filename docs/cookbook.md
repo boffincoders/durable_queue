@@ -1,6 +1,8 @@
 # durable_queue cookbook
 
-Recipes for common jobs. Each one is a complete file in [`examples/cookbook`](../examples/cookbook), which CI analyses on every push against the code in this repository, so the recipes keep compiling as the packages change. For what the queue promises in each case, see [Guarantees](guarantees.md).
+New to durable_queue? Start with the [quick start](quickstart.md).
+
+Recipes for common jobs. Each one is a complete file in [`examples/cookbook`](../examples/cookbook) or, for recipes that use Firebase, Supabase, Riverpod, or Bloc, [`examples/cookbook_stacks`](../examples/cookbook_stacks). CI analyses both on every push against the code in this repository, so the recipes keep compiling as the packages change. For what the queue promises in each case, see [Guarantees](guarantees.md).
 
 | Recipe | Packages |
 | --- | --- |
@@ -12,6 +14,10 @@ Recipes for common jobs. Each one is a complete file in [`examples/cookbook`](..
 | [Show progress in the UI](#show-progress-in-the-ui) | core, flutter |
 | [Handle work that failed for good](#handle-work-that-failed-for-good) | core |
 | [Test retries without waiting](#test-retries-without-waiting) | core |
+| [Upload to Firebase Storage](#upload-to-firebase-storage) | core, `firebase_storage` |
+| [Sync records to Supabase](#sync-records-to-supabase) | core, `supabase_flutter` |
+| [Use the queue with Riverpod](#use-the-queue-with-riverpod) | core, flutter, `flutter_riverpod` |
+| [Use the queue with Bloc](#use-the-queue-with-bloc) | core, flutter, `flutter_bloc` |
 
 In every recipe, open the queue on persistent storage (`durable_queue_sqlite`) in a real app, register task types before `queue.start()`, and keep secrets out of task payloads.
 
@@ -196,3 +202,108 @@ clock.advance(const Duration(seconds: 30));
 final result = await queue.drain(); // the retry runs
 expect(result.completed, 1);
 ```
+
+## Upload to Firebase Storage
+
+[`firebase_storage_upload.dart`](../examples/cookbook_stacks/lib/firebase_storage_upload.dart)
+
+Each upload is a task with the file's path and its place in the bucket. It is retried across restarts, reports progress, and stops when the task is cancelled or held, so a user can pause it. Uploading to the same path again overwrites the object, so a repeated attempt adds no copy.
+
+```dart
+handler: (task, context) async {
+  final file = File(task.localPath);
+  if (!file.existsSync()) throw MissingUploadFile(task.localPath);
+
+  final upload = storage.ref(task.storagePath).putFile(file);
+  final progress = upload.snapshotEvents.listen((snapshot) {
+    if (snapshot.totalBytes > 0) {
+      context.reportProgress(snapshot.bytesTransferred / snapshot.totalBytes);
+    }
+  }, onError: (Object _) {});
+  unawaited(context.whenCancellationRequested.then((_) => upload.cancel()));
+  try {
+    await upload;
+  } finally {
+    await progress.cancel();
+  }
+},
+```
+
+`maxConcurrent: 2` keeps two uploads going at a time, and `retryIf` stops retrying errors another attempt cannot fix, such as `unauthorized`. The upload runs in the app, so it stops while the app is closed and continues on the next launch. For uploads that must go on while the app is closed, upload to a signed URL with [`durable_queue_transfer`](../packages/durable_queue_transfer/README.md).
+
+## Sync records to Supabase
+
+[`supabase_sync.dart`](../examples/cookbook_stacks/lib/supabase_sync.dart)
+
+Save the record in the app's own database first, then enqueue a task with only its id. When the task runs, it reads the latest version and upserts it, so edits made offline reach the server, and a repeated attempt writes the same row again.
+
+```dart
+handler: (task, context) async {
+  final note = await loadNote(task.noteId);
+  if (note == null) {
+    await supabase.from('notes').delete().eq('id', task.noteId);
+  } else {
+    await supabase.from('notes').upsert(note);
+  }
+},
+retryIf: (error, stackTrace) => error is! PostgrestException,
+```
+
+A `PostgrestException` means Supabase rejected the row, which another attempt will not change; network errors are retried. Add the network gate from [Submit a form now, or when back online](#submit-a-form-now-or-when-back-online) so syncs wait while offline without using attempts.
+
+## Use the queue with Riverpod
+
+[`riverpod_state.dart`](../examples/cookbook_stacks/lib/riverpod_state.dart)
+
+Create the queue in `main()`, hand it to Riverpod with an override, and expose the queue's streams as providers. `DurableQueueScope` still starts the queue with the app.
+
+```dart
+final queueProvider = Provider<DurableQueue>(
+  (ref) => throw UnimplementedError('Override queueProvider in main()'),
+);
+
+final uploadsProvider = StreamProvider<List<StoredTask>>(
+  (ref) => ref.watch(queueProvider).watchGroup('uploads'),
+);
+
+final progressProvider = StreamProvider.family<TaskProgress?, String>(
+  (ref, taskId) => ref.watch(queueProvider).watchProgress(taskId),
+);
+
+runApp(
+  ProviderScope(
+    overrides: [queueProvider.overrideWithValue(queue)],
+    child: DurableQueueScope(queue: queue, child: app),
+  ),
+);
+```
+
+## Use the queue with Bloc
+
+[`bloc_state.dart`](../examples/cookbook_stacks/lib/bloc_state.dart)
+
+A cubit that follows one group, with actions the UI can call:
+
+```dart
+class QueueGroupCubit extends Cubit<List<StoredTask>> {
+  QueueGroupCubit(this.queue, String group) : super(const []) {
+    _subscription = queue.watchGroup(group).listen(emit);
+  }
+
+  final DurableQueue queue;
+  late final StreamSubscription<List<StoredTask>> _subscription;
+
+  Future<void> pause(String id) => queue.hold(id);
+  Future<void> resume(String id) => queue.release(id);
+  Future<void> retry(String id) => queue.retry(id);
+
+  @override
+  Future<void> close() async {
+    await _subscription.cancel();
+    return super.close();
+  }
+}
+```
+
+Use `BlocProvider` and `BlocBuilder<QueueGroupCubit, List<StoredTask>>` as usual; `QueueProgressBuilder` adds a progress bar per task.
+

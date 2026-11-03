@@ -204,6 +204,12 @@ final class DocPage {
 
 final docPages = [
   DocPage(
+    'docs/quickstart.md',
+    'quickstart/',
+    section: 'Start here',
+    title: 'Quick start',
+  ),
+  DocPage(
     'packages/durable_queue/README.md',
     'guide/',
     section: 'Start here',
@@ -264,6 +270,7 @@ final docPages = [
 
 /// Top bar links.
 const topNav = [
+  ('quickstart/', 'Quick start'),
   ('guide/', 'Guide'),
   ('packages/', 'Packages'),
   ('cookbook/', 'Cookbook'),
