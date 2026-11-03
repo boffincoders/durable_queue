@@ -1,6 +1,6 @@
 # durable_queue
 
-Persistent, retryable task execution for Dart and Flutter.
+A durable task queue for Flutter and Dart: persistent, retryable tasks that survive crashes, restarts, and going offline.
 
 ![Demo on an Android phone: photos are queued, the app goes to the home screen, the uploads still reach the server, and the server is told about each one when the app is opened again](https://raw.githubusercontent.com/boffincoders/durable_queue/main/docs/media/durable_queue_demo_android.gif)
 
@@ -25,7 +25,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * Tasks are data, so they can be stored and rebuilt after a restart
 * Task versions: tasks stored by an older app release are migrated after an update
 * Fixed and exponential retry with optional jitter, and a `retryIf` filter
-* Concurrency limits and priorities
+* Concurrency limits, for the queue and per task type, and priorities
 * Scheduled tasks: start at a given time or after a delay
 * Recurring tasks: run a task every few hours, across restarts
 * Timeouts per task type, and tasks that expire if they have not started in time
@@ -38,6 +38,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 * `drain`: run what is ready within a time limit, for background jobs
 * Hand-off: a task can wait for work the operating system finishes, such as a background upload
 * Lifecycle events, queries by status or group, counts per status, and `waitFor` one task
+* Progress reporting for long tasks, kept in memory, for progress bars
 * A dead-letter queue: failed tasks stay stored with their errors until you retry or remove them
 * Ready-made metrics (counts, success rate, run and wait times per task type) and logging
 * Startup recovery of tasks interrupted by a crash
@@ -370,6 +371,22 @@ await queue.enqueue(UploadLogsTask(), priority: -5);
 
 Among tasks that are ready to start, higher `priority` goes first; equal priorities keep enqueue order. The default is `0`. Priority decides which task gets the next free slot. It never interrupts a handler that is already running.
 
+## Concurrency per task type
+
+`maxConcurrentTasks` limits how many handlers the queue runs at once. To limit one type within that, for example two uploads at a time while other work goes on, pass `maxConcurrent` to `register`:
+
+```dart
+final queue = DurableQueue(storage: storage, maxConcurrentTasks: 4);
+queue.register<UploadPhotoTask>(
+  type: 'upload_photo',
+  decoder: UploadPhotoTask.fromJson,
+  handler: uploadPhoto,
+  maxConcurrent: 2,
+);
+```
+
+Ready tasks of a full type wait, without using attempts, and start in their usual order as slots free; tasks of other types run meanwhile. A task handed off to outside work (see below) does not take a slot. After a restart, a task that was waiting for a slot starts within `gateRecheckInterval` (five minutes by default) if no slot of its type frees before then.
+
 ## Dependencies and chains
 
 A task can wait for other tasks:
@@ -414,7 +431,22 @@ final syncTasks = await queue.getTasks(group: 'sync');
 final cancelled = await queue.cancelGroup('sync');
 ```
 
-A group is a label. `cancelGroup` cancels every active task in it, using the same rules as `cancel`, and returns how many tasks it affected.
+A group is a label. `cancelGroup` cancels every active task in it, using the same rules as `cancel`, and returns how many tasks it affected. `counts(group:)`, `retryFailed(group:)`, and `durable_queue_flutter`'s `QueueGroupBuilder` work on a group too.
+
+To store many tasks at once, for example a sync batch, use `enqueueAll`. It validates every task first, stores them in one operation, and starts work once:
+
+```dart
+final ids = await queue.enqueueAll(
+  [for (final id in productIds) SyncProductTask(id)],
+  group: 'sync-products',
+  retryPolicy: RetryPolicy.exponential(
+    maxAttempts: 5,
+    initialDelay: Duration(seconds: 2),
+  ),
+);
+```
+
+The options apply to every task; the tasks do not depend on each other (use `enqueueChain` for that). For a deduplication or idempotency key per task, call `enqueue` for each.
 
 ## Rate limits
 
@@ -638,6 +670,21 @@ if (done.status != TaskStatus.completed) print(done.lastFailure);
 `TaskDeferred` says why a task waits (`rateLimit`, `gateClosed`, or `gateError`), which limit or gate is responsible, and until when.
 
 The event stream is broadcast and does not replay events that happened before the listener subscribed.
+
+### Progress
+
+A handler can report how far it has got, for example while it uploads:
+
+```dart
+handler: (task, context) async {
+  await uploadFile(
+    task.path,
+    onProgress: (sent, total) => context.reportProgress(sent / total),
+  );
+},
+```
+
+Read it with `queue.progressOf(taskId)`, or listen to `queue.progress`; `durable_queue_flutter`'s `QueueProgressBuilder` rebuilds a widget with it. Progress is kept in memory and never written to storage, so reporting often costs no database writes. It is cleared when an attempt ends and starts again with the next one; after a restart it is empty until the task reports again. Work that runs outside a handler, such as a handed-off upload, reports with `queue.reportProgress(taskId, fraction)`; `durable_queue_transfer` does this for you.
 
 ### Metrics and logging
 

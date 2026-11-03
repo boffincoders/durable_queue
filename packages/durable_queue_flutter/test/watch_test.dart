@@ -132,6 +132,54 @@ void main() {
     });
   });
 
+  group('watchProgress', () {
+    test(
+      'emits the current progress, each report, and null at the end',
+      () async {
+        final reporter = DurableQueue(
+          storage: MemoryQueueStorage(),
+          clock: clock,
+        );
+        addTearDown(reporter.close);
+        final go = Completer<void>();
+        late TaskContext running;
+        reporter.register<Note>(
+          type: 'note',
+          decoder: Note.fromJson,
+          handler: (task, context) async {
+            running = context;
+            await go.future;
+          },
+        );
+        final id = await reporter.enqueue(Note('upload'));
+        final seen = <double?>[];
+        final sub = reporter
+            .watchProgress(id)
+            .listen((p) => seen.add(p?.fraction));
+        await pumpEventQueue();
+        await reporter.start();
+        await pumpEventQueue();
+        running.reportProgress(0.5);
+        await pumpEventQueue();
+        running.reportProgress(0.9);
+        await pumpEventQueue();
+        go.complete();
+        await pumpEventQueue();
+        expect(seen, [null, 0.5, 0.9, null]);
+        await sub.cancel();
+      },
+    );
+
+    test('ends when the queue closes', () async {
+      final local = DurableQueue(storage: MemoryQueueStorage(), clock: clock);
+      final done = Completer<void>();
+      local.watchProgress('x').listen((_) {}, onDone: done.complete);
+      await pumpEventQueue();
+      await local.close();
+      await done.future;
+    });
+  });
+
   group('holds', () {
     test('watchTask and watchGroup update on hold and release', () async {
       final id = await queue.enqueue(Note('a'), group: 'g');

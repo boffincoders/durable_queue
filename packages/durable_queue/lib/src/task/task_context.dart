@@ -19,8 +19,10 @@ final class TaskContext {
     required bool Function() isCancellationRequested,
     Future<void>? whenCancellationRequested,
     void Function(String reference)? onHandOff,
+    void Function(double fraction)? onProgress,
   }) : _isCancellationRequested = isCancellationRequested,
        _onHandOff = onHandOff,
+       _onProgress = onProgress,
        whenCancellationRequested =
            whenCancellationRequested ?? Completer<void>().future;
 
@@ -56,6 +58,17 @@ final class TaskContext {
   final Future<void> whenCancellationRequested;
 
   final void Function(String reference)? _onHandOff;
+  final void Function(double fraction)? _onProgress;
+
+  /// Reports how far this attempt has got, from 0 to 1, for example an
+  /// upload's sent bytes divided by its size.
+  ///
+  /// The value is kept in memory, not stored: read it with
+  /// [DurableQueue.progressOf] or listen to [DurableQueue.progress]. Values
+  /// outside 0 to 1 are clamped; NaN is ignored. Reporting often is cheap,
+  /// but listeners see every value, so report at most a few times a second.
+  /// Does nothing for a context that was not created by a queue.
+  void reportProgress(double fraction) => _onProgress?.call(fraction);
 
   /// Hands the task to work that continues outside this handler, such as an
   /// upload run by the operating system, under [reference].

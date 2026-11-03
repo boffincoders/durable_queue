@@ -54,6 +54,55 @@ extension DurableQueueWatch on DurableQueue {
     );
   }
 
+  /// The progress of task [id]'s current attempt, now and as it changes
+  /// (see `TaskContext.reportProgress`).
+  ///
+  /// Emits the current value when listened to, then each new report, and
+  /// null when an attempt starts or ends. Progress is kept in memory only,
+  /// so after a restart it is null until the task reports again.
+  ///
+  /// The stream ends when the queue is closed.
+  Stream<TaskProgress?> watchProgress(String id) {
+    late StreamController<TaskProgress?> controller;
+    StreamSubscription<TaskProgress>? reports;
+    StreamSubscription<QueueEvent>? events;
+    TaskProgress? last;
+    var started = false;
+
+    void emit(TaskProgress? value) {
+      if (controller.isClosed) return;
+      if (started && identical(value, last)) return;
+      started = true;
+      last = value;
+      controller.add(value);
+    }
+
+    controller = StreamController<TaskProgress?>(
+      onListen: () {
+        reports = progress.listen((report) {
+          if (report.taskId == id) emit(report);
+        });
+        events = this.events.listen(
+          (event) {
+            if (event.taskId != id) return;
+            // The queue clears progress when an attempt starts or ends.
+            emit(progressOf(id));
+          },
+          onDone: () async {
+            await reports?.cancel();
+            await controller.close();
+          },
+        );
+        emit(progressOf(id));
+      },
+      onCancel: () async {
+        await reports?.cancel();
+        await events?.cancel();
+      },
+    );
+    return controller.stream;
+  }
+
   Stream<T> _watch<T>({
     required Future<T> Function() read,
     required bool Function(String taskId, bool isEnqueue) affects,

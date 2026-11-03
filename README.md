@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-d4a012.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-boffincoders.github.io-d4a012.svg)](https://boffincoders.github.io/durable_queue/)
 
-**Persistent, retryable task execution for Dart and Flutter.**
+**A durable task queue for Flutter and Dart: persistent, retryable tasks that survive crashes, restarts, and going offline.**
 
 Work such as uploads, messages, and sync is described as data, stored through a pluggable storage interface, and run by a worker that owns retries with backoff, concurrency and rate limits, priorities, dependencies, deduplication, waiting for the network, and crash recovery.
 

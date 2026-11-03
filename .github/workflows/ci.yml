@@ -222,6 +222,16 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ matrix.channel }}
+      # Test against durable_queue in this repository, not the published
+      # one, so a change that needs an unreleased core version is tested
+      # before it is published. pub leaves this file out when publishing.
+      - name: Use the core package from this repository
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            durable_queue:
+              path: ../durable_queue
+          YAML
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze --fatal-infos
@@ -243,6 +253,16 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ matrix.channel }}
+      # Test against durable_queue in this repository, not the published
+      # one, so a change that needs an unreleased core version is tested
+      # before it is published. pub leaves this file out when publishing.
+      - name: Use the core package from this repository
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            durable_queue:
+              path: ../durable_queue
+          YAML
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze --fatal-infos
@@ -264,6 +284,16 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ matrix.channel }}
+      # Test against durable_queue in this repository, not the published
+      # one, so a change that needs an unreleased core version is tested
+      # before it is published. pub leaves this file out when publishing.
+      - name: Use the core package from this repository
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            durable_queue:
+              path: ../durable_queue
+          YAML
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze --fatal-infos
@@ -286,6 +316,16 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: ${{ matrix.channel }}
+      # Test against durable_queue in this repository, not the published
+      # one, so a change that needs an unreleased core version is tested
+      # before it is published. pub leaves this file out when publishing.
+      - name: Use the core package from this repository
+        run: |
+          cat > pubspec_overrides.yaml <<'YAML'
+          dependency_overrides:
+            durable_queue:
+              path: ../durable_queue
+          YAML
       - run: flutter pub get
       - run: dart format --output=none --set-exit-if-changed .
       - run: flutter analyze --fatal-infos

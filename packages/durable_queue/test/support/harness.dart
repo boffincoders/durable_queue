@@ -74,6 +74,7 @@ final class QueueHarness {
     Duration? timeout,
     int version = 1,
     TaskMigration? migrate,
+    int? maxConcurrent,
   }) {
     queue.register<ValueTask>(
       type: type,
@@ -87,6 +88,7 @@ final class QueueHarness {
       timeout: timeout,
       version: version,
       migrate: migrate,
+      maxConcurrent: maxConcurrent,
     );
   }
 

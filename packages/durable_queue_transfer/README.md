@@ -101,6 +101,10 @@ Call it once per launch, in the app's main isolate, before or after `queue.start
 
 So "it will be done" holds as long as the app is eventually opened again and the retry budget is not used up. A force-quit can delay a transfer until the next launch; it does not lose the task.
 
+## Progress
+
+Transfer progress is passed to the queue: read it with `queue.progressOf(taskId)` or `queue.progress`, or show it with `durable_queue_flutter`'s `QueueProgressBuilder`. `start` asks `background_downloader` for progress updates as well as status updates, unless the transfer asked for none (`updates: Updates.none`). Pass `reportProgress: false` to `QueueTransfers` to turn this off.
+
 ## Pause and resume
 
 Let the user pause one transfer with the queue's `hold` and `release`:

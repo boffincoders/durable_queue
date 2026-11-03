@@ -1,4 +1,6 @@
 // Widget tests. They need the Flutter SDK and run in CI with `flutter test`.
+import 'dart:async';
+
 import 'package:durable_queue/durable_queue.dart';
 import 'package:durable_queue_flutter/durable_queue_flutter.dart';
 import 'package:flutter/widgets.dart';
@@ -176,6 +178,48 @@ void main() {
     );
     await settle(tester);
     expect(find.text('completed'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+    await queue.close();
+  });
+
+  testWidgets('QueueProgressBuilder shows reported progress', (tester) async {
+    final queue = DurableQueue(
+      storage: MemoryQueueStorage(),
+      clock: FakeQueueClock(DateTime.utc(2026, 10, 20)),
+    );
+    final go = Completer<void>();
+    TaskContext? running;
+    queue.register<Note>(
+      type: 'note',
+      decoder: Note.fromJson,
+      handler: (task, context) async {
+        running = context;
+        await go.future;
+      },
+    );
+    final id = await queue.enqueue(Note('upload'));
+    await tester.pumpWidget(
+      app(
+        queue,
+        QueueProgressBuilder(
+          taskId: id,
+          builder: (context, progress) => Text(
+            progress == null
+                ? 'no progress'
+                : '${(progress.fraction * 100).round()}%',
+          ),
+        ),
+      ),
+    );
+    await settle(tester);
+    expect(find.text('no progress'), findsOneWidget);
+    running!.reportProgress(0.42);
+    await settle(tester);
+    expect(find.text('42%'), findsOneWidget);
+    go.complete();
+    await settle(tester);
+    expect(find.text('no progress'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     await settle(tester);
     await queue.close();

@@ -74,7 +74,8 @@ class _Home extends StatelessWidget {
             const SizedBox(height: 4),
             const Text(
               'Add photos, then close the app. Uploads keep going; the '
-              'server is told about each one once it is uploaded.',
+              'server is told about each one once it is uploaded. Tap '
+              'Pause on a row to hold that task, Resume to let it go on.',
               style: TextStyle(color: _muted),
             ),
             const SizedBox(height: 4),
@@ -174,6 +175,7 @@ class _TaskRow extends StatelessWidget {
         ? 'Upload ${task.payload['fileName']}'
         : 'Tell server: ${task.payload['url']}';
     final failure = task.lastFailure?.error;
+    final queue = DurableQueueScope.of(context);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
@@ -185,6 +187,13 @@ class _TaskRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(what, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (upload && task.status == TaskStatus.running)
+                  QueueProgressBuilder(
+                    taskId: task.id,
+                    builder: (context, progress) => progress == null
+                        ? const SizedBox.shrink()
+                        : _ProgressBar(fraction: progress.fraction),
+                  ),
                 if (failure != null && task.status != TaskStatus.completed)
                   Text(
                     'attempt ${task.attempts}: $failure',
@@ -195,12 +204,17 @@ class _TaskRow extends StatelessWidget {
               ],
             ),
           ),
+          if (task.held)
+            _Button('Resume', () => queue.release(task.id))
+          else if (task.status.isActive)
+            _Button('Pause', () => queue.hold(task.id)),
         ],
       ),
     );
   }
 
   static String _label(StoredTask task) {
+    if (task.held) return 'paused';
     if (task.isHandedOff) return 'uploading';
     return switch (task.status) {
       TaskStatus.pending => 'queued',
@@ -211,6 +225,49 @@ class _TaskRow extends StatelessWidget {
       TaskStatus.failed => 'failed',
       TaskStatus.cancelled => 'cancelled',
     };
+  }
+}
+
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar({required this.fraction});
+
+  final double fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, right: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: SizedBox(
+                height: 4,
+                child: Stack(
+                  children: [
+                    const Positioned.fill(
+                      child: ColoredBox(color: Color(0xFFE2E2EA)),
+                    ),
+                    FractionallySizedBox(
+                      alignment: Alignment.centerLeft,
+                      widthFactor: fraction,
+                      heightFactor: 1,
+                      child: const ColoredBox(color: _accent),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '${(fraction * 100).round()}%',
+            style: const TextStyle(color: _muted, fontSize: 12),
+          ),
+        ],
+      ),
+    );
   }
 }
 

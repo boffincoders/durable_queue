@@ -231,6 +231,78 @@ class _QueueTaskBuilderState extends State<QueueTaskBuilder> {
   }
 }
 
+/// Rebuilds with the progress of one task's current attempt, for example
+/// for a progress bar.
+///
+/// Uses [DurableQueueWatch.watchProgress]. [queue] defaults to
+/// `DurableQueueScope.of(context)`. The progress is null before the task
+/// reports any and between attempts.
+///
+/// ```dart
+/// QueueProgressBuilder(
+///   taskId: uploadId,
+///   builder: (context, progress) =>
+///       LinearProgressIndicator(value: progress?.fraction),
+/// )
+/// ```
+class QueueProgressBuilder extends StatefulWidget {
+  /// Creates a builder for [taskId].
+  const QueueProgressBuilder({
+    super.key,
+    required this.taskId,
+    required this.builder,
+    this.queue,
+  });
+
+  /// The task to show.
+  final String taskId;
+
+  /// Builds the UI for the current progress.
+  final Widget Function(BuildContext context, TaskProgress? progress) builder;
+
+  /// The queue; defaults to the enclosing [DurableQueueScope].
+  final DurableQueue? queue;
+
+  @override
+  State<QueueProgressBuilder> createState() => _QueueProgressBuilderState();
+}
+
+class _QueueProgressBuilderState extends State<QueueProgressBuilder> {
+  Stream<TaskProgress?>? _stream;
+  DurableQueue? _queue;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _subscribe();
+  }
+
+  @override
+  void didUpdateWidget(QueueProgressBuilder oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.taskId != widget.taskId || oldWidget.queue != widget.queue) {
+      _queue = null;
+      _subscribe();
+    }
+  }
+
+  void _subscribe() {
+    final queue = widget.queue ?? DurableQueueScope.of(context);
+    if (identical(queue, _queue) && _stream != null) return;
+    _queue = queue;
+    _stream = queue.watchProgress(widget.taskId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<TaskProgress?>(
+      stream: _stream,
+      initialData: _queue?.progressOf(widget.taskId),
+      builder: (context, snapshot) => widget.builder(context, snapshot.data),
+    );
+  }
+}
+
 /// Rebuilds with the tasks of one group, for example to show upload
 /// progress for an album.
 ///

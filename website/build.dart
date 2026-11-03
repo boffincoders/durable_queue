@@ -471,6 +471,7 @@ void _page({
 <html lang="en">
 <head>
 <meta charset="utf-8">
+$extraHead
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${_esc(fullTitle)}</title>
 <meta name="description" content="${_esc(description)}">
@@ -497,7 +498,6 @@ ${noindex ? '<meta name="robots" content="noindex">' : _structuredData(file, ful
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap">
 <link rel="stylesheet" href="${r}style.css">
 <script>try{var t=localStorage.getItem("dq-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
-$extraHead
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>

@@ -7,6 +7,7 @@ import '../clock/queue_clock.dart';
 import '../errors.dart';
 import '../events/queue_event.dart';
 import '../events/task_hold_changed.dart';
+import '../events/task_progress.dart';
 import '../gates/queue_gate.dart';
 import '../internal/async_lock.dart';
 import '../internal/rate_limiter.dart';
@@ -211,6 +212,17 @@ final class DurableQueue {
   final Set<String> _cancelRequested = {};
   late final RecurringScheduler _recurring = RecurringScheduler(this);
 
+  /// Running handlers per task type, for `register(maxConcurrent:)`.
+  final Map<String, int> _runningByType = {};
+
+  /// Tasks put aside because their type had no free slot, per type, in the
+  /// order they were reached, with the time they were put aside until.
+  final Map<String, LinkedHashMap<String, DateTime>> _waitingForSlot = {};
+
+  final Map<String, TaskProgress> _progress = {};
+  final StreamController<TaskProgress> _progressReports =
+      StreamController<TaskProgress>.broadcast();
+
   /// Running tasks whose handler was asked to stop because of a hold. They
   /// go back to the queue when the handler stops, even if released since.
   final Set<String> _holdInterrupted = {};
@@ -248,6 +260,38 @@ final class DurableQueue {
   /// Hold changes are not [QueueEvent]s, so switches over [events] are
   /// unaffected. Code that shows tasks listens to both.
   Stream<TaskHoldChanged> get holdChanges => _holdChanges.stream;
+
+  /// Progress reports of running tasks, from [TaskContext.reportProgress]
+  /// and [reportProgress]. Broadcast; it does not replay earlier reports.
+  ///
+  /// Progress is kept in memory only and is not written to storage, so
+  /// reporting often costs no database writes. It is cleared when a task's
+  /// attempt ends, and starts again with the next attempt.
+  Stream<TaskProgress> get progress => _progressReports.stream;
+
+  /// The last progress reported for task [id] in its current attempt, or
+  /// null if none was reported, it is not running, or it was reported
+  /// before this queue was created.
+  TaskProgress? progressOf(String id) => _progress[id];
+
+  /// Reports progress for task [id], for work that runs outside its
+  /// handler, such as a handed-off upload (see [TaskContext.handOff]).
+  /// Handlers use [TaskContext.reportProgress] instead.
+  ///
+  /// [fraction] is clamped to 0 to 1; NaN is ignored. The report is not
+  /// checked against storage: report only for a task you know is running.
+  void reportProgress(String id, double fraction) {
+    if (_closed || fraction.isNaN) return;
+    final report = TaskProgress(
+      taskId: id,
+      fraction: fraction.clamp(0.0, 1.0),
+      reportedAt: _clock.now(),
+    );
+    final previous = _progress[id];
+    if (previous != null && previous.fraction == report.fraction) return;
+    _progress[id] = report;
+    if (!_progressReports.isClosed) _progressReports.add(report);
+  }
 
   /// Worker storage failures, reported before each automatic retry.
   ///
@@ -301,9 +345,15 @@ final class DurableQueue {
   /// an app that knows its version runs the queue (see
   /// [TaskVersionException]).
   ///
+  /// [maxConcurrent] limits how many handlers of this type run at once, for
+  /// example 2 uploads, within the queue's [maxConcurrentTasks]. Ready tasks
+  /// of the type wait for a free slot without using attempts, and tasks of
+  /// other types run meanwhile. Time a task spends handed off (see
+  /// [TaskContext.handOff]) does not take a slot.
+  ///
   /// Throws [ArgumentError] if a gate in [requires] has not been added, if
   /// [deferOn] is given without [requires], if [timeout] is not positive,
-  /// or if [version] is less than 1.
+  /// or if [version] or [maxConcurrent] is less than 1.
   void register<T extends DurableTask>({
     required String type,
     required TaskDecoder<T> decoder,
@@ -316,6 +366,7 @@ final class DurableQueue {
     Duration? timeout,
     int version = 1,
     TaskMigration? migrate,
+    int? maxConcurrent,
   }) {
     _ensureOpen();
     for (final gate in requires) {
@@ -346,6 +397,7 @@ final class DurableQueue {
       timeout: timeout,
       version: version,
       migrate: migrate,
+      maxConcurrent: maxConcurrent,
     );
     if (rateLimit != null) _typeLimiters[type] = RateLimiter(rateLimit);
   }
@@ -620,6 +672,62 @@ final class DurableQueue {
 
   /// Names passed to [schedule] on this queue, and not unscheduled.
   Set<String> get schedules => _recurring.names;
+
+  /// Persists [tasks] in one serialized operation and returns their ids in
+  /// order.
+  ///
+  /// Unlike [enqueueChain], the tasks do not depend on each other: they run
+  /// in their usual order, at the same time when slots allow. [retryPolicy],
+  /// [priority], [group], [dependsOn], [onDependencyFailure], [runAt] or
+  /// [delay], and [expiresAt] or [expiresAfter] apply to every task. For a
+  /// deduplication or idempotency key per task, call [enqueue] for each.
+  ///
+  /// Every task is validated before anything is stored, and a running queue
+  /// starts work once, after all are stored. A storage error part-way
+  /// through can still leave the first tasks stored.
+  ///
+  /// Throws [ArgumentError] if [tasks] is empty, plus everything [enqueue]
+  /// throws.
+  Future<List<String>> enqueueAll(
+    List<DurableTask> tasks, {
+    RetryPolicy? retryPolicy,
+    int priority = 0,
+    Iterable<String> dependsOn = const [],
+    DependencyFailurePolicy onDependencyFailure =
+        DependencyFailurePolicy.cancel,
+    String? group,
+    DateTime? runAt,
+    Duration? delay,
+    DateTime? expiresAt,
+    Duration? expiresAfter,
+  }) async {
+    _ensureOpen();
+    if (tasks.isEmpty) {
+      throw ArgumentError.value(tasks, 'tasks', 'Must not be empty');
+    }
+    final start = _runAt(runAt, delay);
+    final expiry = _expiresAt(expiresAt, expiresAfter, start);
+    final requests = [
+      for (final task in tasks)
+        _prepare(
+          task,
+          retryPolicy: retryPolicy,
+          priority: priority,
+          onDependencyFailure: onDependencyFailure,
+          group: group,
+          dependsOn: dependsOn,
+          runAt: start,
+          expiresAt: expiry,
+        ),
+    ];
+    final events = <QueueEvent>[];
+    final ids = await _lock.synchronized(() async {
+      return [for (final request in requests) await _store(request, events)];
+    });
+    _emitAll(events);
+    if (_runState == QueueRunState.running) unawaited(_pump());
+    return ids;
+  }
 
   _EnqueueRequest _prepare(
     DurableTask task, {
@@ -1677,6 +1785,7 @@ final class DurableQueue {
     await _recurring.close();
     await _events.close();
     await _holdChanges.close();
+    await _progressReports.close();
     await _storageErrors.close();
   }
 
@@ -1986,6 +2095,7 @@ final class DurableQueue {
           final claimed = next.claimed!;
           if (_runState != QueueRunState.running) {
             await _lock.synchronized(() => _revertClaim(claimed));
+            _freeTypeSlot(claimed.type);
             break;
           }
           _enterFlight();
@@ -2040,6 +2150,21 @@ final class DurableQueue {
       _reservations.remove(task.id);
       return _Claim.expired(await _commit(_expired(task, now), _retryStorage));
     }
+    final limit = _registry.find(task.type)?.maxConcurrent;
+    if (limit != null && (_runningByType[task.type] ?? 0) >= limit) {
+      // Put it aside until a slot of its type frees, or the recheck time as
+      // a fallback if this process forgets it.
+      final until = now.add(gateRecheckInterval);
+      await _retryStorage(
+        () => _storage.update(
+          task.copyWith(updatedAt: now, nextAttemptAt: until),
+        ),
+        'update',
+      );
+      _waitingForSlot.putIfAbsent(task.type, LinkedHashMap.new)[task.id] =
+          until;
+      return const _Claim.expired([]);
+    }
     final deferral = _deferralFor(task, now);
     if (deferral != null) {
       await _retryStorage(
@@ -2071,6 +2196,7 @@ final class DurableQueue {
       handOffReference: null,
     );
     await _retryStorage(() => _storage.update(claimed), 'update');
+    _runningByType.update(task.type, (n) => n + 1, ifAbsent: () => 1);
     return _Claim.claimed(claimed);
   }
 
@@ -2274,9 +2400,54 @@ final class DurableQueue {
       _cancelRequested.remove(claimed.id);
       _holdInterrupted.remove(claimed.id);
       _cancelSignals.remove(claimed.id);
+      _freeTypeSlot(claimed.type);
       _exitFlight();
       if (_runState == QueueRunState.running) unawaited(_pump());
     }
+  }
+
+  /// Frees a slot of [type] and lets the first task that waited for one
+  /// become ready again.
+  void _freeTypeSlot(String type) {
+    final running = (_runningByType[type] ?? 1) - 1;
+    if (running <= 0) {
+      _runningByType.remove(type);
+    } else {
+      _runningByType[type] = running;
+    }
+    final waiting = _waitingForSlot[type];
+    if (waiting == null || waiting.isEmpty) return;
+    unawaited(
+      _lock
+          .synchronized(() async {
+            while (waiting.isNotEmpty) {
+              final MapEntry(key: id, value: until) = waiting.entries.first;
+              waiting.remove(id);
+              final task = await _retryStorage(() => _storage.get(id), 'get');
+              if (task == null || task.nextAttemptAt != until) continue;
+              if (task.status != TaskStatus.pending &&
+                  task.status != TaskStatus.retryScheduled) {
+                continue;
+              }
+              final now = _clock.now();
+              await _retryStorage(
+                () => _storage.update(
+                  task.copyWith(
+                    updatedAt: now,
+                    nextAttemptAt: task.status == TaskStatus.pending
+                        ? null
+                        : now,
+                  ),
+                ),
+                'update',
+              );
+              return;
+            }
+          })
+          .then((_) {
+            if (_runState == QueueRunState.running) unawaited(_pump());
+          }),
+    );
   }
 
   Future<void> _runClaimed(StoredTask claimed) async {
@@ -2325,6 +2496,7 @@ final class DurableQueue {
         }
         _recordHandOff(claimed, reference);
       },
+      onProgress: (fraction) => reportProgress(claimed.id, fraction),
     );
 
     try {
@@ -2937,6 +3109,16 @@ final class DurableQueue {
   }
 
   void _emit(QueueEvent event) {
+    switch (event) {
+      case TaskStarted() ||
+          TaskCompleted() ||
+          TaskFailed() ||
+          TaskCancelled() ||
+          TaskRetryScheduled():
+        _progress.remove(event.taskId);
+      default:
+        break;
+    }
     _drainStats?.count(event);
     if (!_events.isClosed) _events.add(event);
   }

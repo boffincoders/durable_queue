@@ -73,7 +73,19 @@ QueueGroupBuilder(
 )
 ```
 
-Both rebuild when a task they show changes, including when it is held or released with `queue.hold` and `queue.release`; show `task.held` as paused. They use the streams `queue.watchTask(id)` and `queue.watchGroup(group, status:)`, which you can also use directly, for example with your own state management. `watchGroup` reloads the group on changes, so keep groups to the size of a screen.
+Both rebuild when a task they show changes, including when it is held or released with `queue.hold` and `queue.release`; show `task.held` as paused.
+
+For a progress bar, `QueueProgressBuilder` rebuilds with the progress a task reports (`TaskContext.reportProgress`, or a transfer's progress with `durable_queue_transfer`):
+
+```dart
+QueueProgressBuilder(
+  taskId: uploadId,
+  builder: (context, progress) =>
+      LinearProgressIndicator(value: progress?.fraction),
+)
+```
+
+The progress is null before the task reports any and between attempts. `queue.watchProgress(id)` is the stream behind it. They use the streams `queue.watchTask(id)` and `queue.watchGroup(group, status:)`, which you can also use directly, for example with your own state management. `watchGroup` reloads the group on changes, so keep groups to the size of a screen.
 
 ## With other durable_queue packages
 

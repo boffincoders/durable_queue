@@ -499,6 +499,72 @@ void main() {
     },
   );
 
+  group('progress', () {
+    test('transfer progress reaches the queue', () async {
+      await transfers.attach();
+      final id = await enqueueUpload();
+      await startAndWaitForTransfer();
+      final transfer = files.enqueued.single;
+      expect(transfer.updates, Updates.statusAndProgress);
+
+      final seen = <double>[];
+      queue.progress.listen((p) => seen.add(p.fraction));
+      files.emitProgress(TaskProgressUpdate(transfer, 0.3));
+      files.emitProgress(TaskProgressUpdate(transfer, -5)); // paused
+      files.emitProgress(TaskProgressUpdate(transfer, 0.6));
+      await pumpEventQueue();
+      expect(seen, [0.3, 0.6]);
+      expect(queue.progressOf(id)!.fraction, 0.6);
+
+      files.emit(TaskStatusUpdate(transfer, TaskStatus.complete));
+      await pumpEventQueue();
+      expect(queue.progressOf(id), isNull);
+    });
+
+    test('a transfer that asked for no updates is left alone', () async {
+      queue.register<_Quiet>(
+        type: 'quiet',
+        decoder: (_) => _Quiet(),
+        handler: (task, context) => transfers.start(
+          context,
+          UploadTask(
+            url: 'https://example.com/upload',
+            filename: 'q.jpg',
+            updates: Updates.none,
+          ),
+        ),
+      );
+      await transfers.attach();
+      await queue.enqueue(_Quiet());
+      await startAndWaitForTransfer();
+      expect(files.enqueued.single.updates, Updates.none);
+    });
+
+    test('reportProgress: false keeps status updates only', () async {
+      final quiet = QueueTransfers(
+        queue,
+        downloader: files,
+        clock: clock,
+        group: 'quiet',
+        reportProgress: false,
+      );
+      addTearDown(quiet.dispose);
+      queue.register<_Quiet>(
+        type: 'quiet',
+        decoder: (_) => _Quiet(),
+        handler: (task, context) => quiet.start(
+          context,
+          UploadTask(url: 'https://example.com/upload', filename: 'q.jpg'),
+        ),
+      );
+      await quiet.attach();
+      expect(files.progressCallbacks.containsKey('quiet'), isFalse);
+      await queue.enqueue(_Quiet());
+      await startAndWaitForTransfer();
+      expect(files.enqueued.single.updates, Updates.status);
+    });
+  });
+
   group('hold and release', () {
     late List<dq.TaskHoldChanged> holds;
 
@@ -686,4 +752,12 @@ final class _Other extends dq.DurableTask {
 
   @override
   Map<String, dynamic> toJson() => {'text': 'x'};
+}
+
+final class _Quiet extends dq.DurableTask {
+  @override
+  String get type => 'quiet';
+
+  @override
+  Map<String, dynamic> toJson() => {'text': 'q'};
 }

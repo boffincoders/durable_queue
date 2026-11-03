@@ -15,6 +15,7 @@ final class FakeDownloader implements FileDownloader {
   final enqueued = <Task>[];
   var enqueueResult = true;
   final callbacks = <String, TaskStatusCallback>{};
+  final progressCallbacks = <String, TaskProgressCallback>{};
   final tracked = <String>[];
   var resumeCalls = 0;
   var rescheduleCalls = 0;
@@ -33,10 +34,13 @@ final class FakeDownloader implements FileDownloader {
   FileDownloader registerCallbacks({
     String group = FileDownloader.defaultGroup,
     TaskStatusCallback? taskStatusCallback,
-    Object? taskProgressCallback,
+    TaskProgressCallback? taskProgressCallback,
     Object? taskNotificationTapCallback,
   }) {
     if (taskStatusCallback != null) callbacks[group] = taskStatusCallback;
+    if (taskProgressCallback != null) {
+      progressCallbacks[group] = taskProgressCallback;
+    }
     return this;
   }
 
@@ -46,7 +50,12 @@ final class FakeDownloader implements FileDownloader {
     Function? callback,
   }) {
     unregistered.add(group);
-    callbacks.remove(group);
+    if (callback == null || identical(callback, callbacks[group])) {
+      callbacks.remove(group);
+    }
+    if (callback == null || identical(callback, progressCallbacks[group])) {
+      progressCallbacks.remove(group);
+    }
     return this;
   }
 
@@ -105,6 +114,11 @@ final class FakeDownloader implements FileDownloader {
     if (!resumeResult) return false;
     native[task.taskId] = task;
     return true;
+  }
+
+  /// Delivers a progress [update] as background_downloader would.
+  void emitProgress(TaskProgressUpdate update) {
+    progressCallbacks[update.task.group]?.call(update);
   }
 
   /// Delivers [update] as background_downloader would.

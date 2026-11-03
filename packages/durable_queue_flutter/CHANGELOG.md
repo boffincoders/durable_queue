@@ -1,3 +1,9 @@
+## 0.1.3
+
+* `QueueProgressBuilder` and `watchProgress(id)`: rebuild with the progress
+  a task reports.
+* Requires `durable_queue` 0.5.12 or later.
+
 ## 0.1.2
 
 * `watchTask`, `watchGroup`, `QueueTaskBuilder`, and `QueueGroupBuilder` also

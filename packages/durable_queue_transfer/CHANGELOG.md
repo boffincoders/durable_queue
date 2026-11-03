@@ -1,3 +1,12 @@
+## 0.2.1
+
+* Transfer progress reaches the queue (`DurableQueue.progressOf`,
+  `DurableQueue.progress`). `start` asks background_downloader for progress
+  updates unless the transfer asked for none. `QueueTransfers(reportProgress:
+  false)` turns this off.
+* `dispose` removes every callback of the transfers' group.
+* Requires `durable_queue` 0.5.12 or later.
+
 ## 0.2.0
 
 * Pause and resume transfers with `DurableQueue.hold` and `release`.

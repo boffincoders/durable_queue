@@ -7,14 +7,14 @@
 /// Site-wide settings.
 abstract final class Site {
   static const name = 'durable_queue';
-  static const tagline = 'Persistent, retryable tasks for Dart and Flutter';
+  static const tagline = 'A durable task queue for Flutter and Dart';
 
   /// The home page's `<title>`.
   static const homeTitle =
-      'durable_queue: a persistent Flutter and Dart task queue with retries';
+      'durable_queue: a durable task queue for Flutter and Dart';
   static const description =
-      'A persistent task queue for Flutter and Dart: with SQLite or Hive '
-      'storage, tasks are stored before enqueue returns and retried with '
+      'A durable, persistent task queue for Flutter and Dart: with SQLite or '
+      'Hive storage, tasks are stored before enqueue returns and retried with '
       'backoff across restarts and crashes; they wait for the network, and '
       'can hand uploads to the operating system so they finish after the app '
       'is closed.';

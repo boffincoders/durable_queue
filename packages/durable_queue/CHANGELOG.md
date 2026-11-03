@@ -1,3 +1,18 @@
+## 0.5.12
+
+New features, no breaking changes.
+
+* Progress: `TaskContext.reportProgress(fraction)` in a handler, and
+  `DurableQueue.reportProgress(id, fraction)` for outside work. Read it with
+  `progressOf(id)` or the `progress` stream (`TaskProgress`). Kept in memory
+  only, cleared when an attempt ends.
+* `register(maxConcurrent:)`: at most that many handlers of a type run at
+  once; other types run meanwhile. Handed-off tasks do not take a slot.
+* `enqueueAll(tasks, ...)`: stores many independent tasks with shared
+  options in one operation.
+* pubspec and README: the description says what the package is, a durable
+  task queue for Flutter and Dart.
+
 ## 0.5.11
 
 New features, no breaking changes. Storage adapters must persist the new

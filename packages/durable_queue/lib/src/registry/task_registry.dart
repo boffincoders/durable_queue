@@ -20,6 +20,7 @@ final class RegisteredTask {
     required this.timeout,
     required this.version,
     required this.migrate,
+    required this.maxConcurrent,
   });
 
   /// Registry key.
@@ -54,6 +55,10 @@ final class RegisteredTask {
 
   /// Converts a payload stored at an earlier [version], or null.
   final TaskMigration? migrate;
+
+  /// Most handlers of this type that may run at once, or null for no limit
+  /// beyond the queue's.
+  final int? maxConcurrent;
 }
 
 /// Handlers keyed by task type.
@@ -85,9 +90,17 @@ final class TaskRegistry {
     Duration? timeout,
     int version = 1,
     TaskMigration? migrate,
+    int? maxConcurrent,
   }) {
     if (type.isEmpty) {
       throw ArgumentError.value(type, 'type', 'Must not be empty');
+    }
+    if (maxConcurrent != null && maxConcurrent < 1) {
+      throw ArgumentError.value(
+        maxConcurrent,
+        'maxConcurrent',
+        'Must be at least 1',
+      );
     }
     if (version < 1) {
       throw ArgumentError.value(version, 'version', 'Must be at least 1');
@@ -110,6 +123,7 @@ final class TaskRegistry {
       timeout: timeout,
       version: version,
       migrate: migrate,
+      maxConcurrent: maxConcurrent,
     );
   }
 

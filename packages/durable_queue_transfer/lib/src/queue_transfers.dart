@@ -7,8 +7,10 @@ import 'package:background_downloader/background_downloader.dart'
         Task,
         TaskException,
         TaskHttpException,
+        TaskProgressUpdate,
         TaskStatus,
-        TaskStatusUpdate;
+        TaskStatusUpdate,
+        Updates;
 import 'package:durable_queue/durable_queue.dart'
     show
         DurableQueue,
@@ -108,6 +110,11 @@ final class QueueTransfers {
   /// * [rescheduleKilled]: whether [attach] calls
   ///   `FileDownloader.rescheduleKilledTasks`, which restarts tracked
   ///   transfers that were killed with the app.
+  /// * [reportProgress]: whether transfer progress is passed to
+  ///   `DurableQueue.reportProgress`, so `DurableQueue.progressOf` and
+  ///   `DurableQueue.progress` show it. [start] then asks
+  ///   background_downloader for progress updates as well as status
+  ///   updates, unless the transfer asks for none.
   QueueTransfers(
     this.queue, {
     FileDownloader? downloader,
@@ -117,6 +124,7 @@ final class QueueTransfers {
     this.lostAfter = const Duration(minutes: 2),
     this.settleDelay = const Duration(seconds: 5),
     this.rescheduleKilled = true,
+    this.reportProgress = true,
     QueueClock clock = const SystemQueueClock(),
   }) : _downloader = downloader,
        _clock = clock {
@@ -150,6 +158,9 @@ final class QueueTransfers {
   /// Whether [attach] reschedules transfers killed with the app.
   final bool rescheduleKilled;
 
+  /// Whether transfer progress is passed on to the queue.
+  final bool reportProgress;
+
   final FileDownloader? _downloader;
   final QueueClock _clock;
   StreamSubscription<QueueEvent>? _events;
@@ -171,7 +182,13 @@ final class QueueTransfers {
   /// enqueue it, which the handler passes on as a normal failure.
   Future<String> start(TaskContext context, Task transfer) async {
     final id = await _freshId(context);
-    final task = transfer.copyWith(taskId: id, group: group);
+    final task = transfer.copyWith(
+      taskId: id,
+      group: group,
+      updates: reportProgress && transfer.updates == Updates.status
+          ? Updates.statusAndProgress
+          : null,
+    );
     // Saved before the transfer starts, so a crash in between is reconciled
     // as a lost transfer rather than starting a second one.
     context.handOff(id);
@@ -201,7 +218,11 @@ final class QueueTransfers {
   Future<void> attach() async {
     if (_attached || _disposed) return;
     _attached = true;
-    _files.registerCallbacks(group: group, taskStatusCallback: _onStatus);
+    _files.registerCallbacks(
+      group: group,
+      taskStatusCallback: _onStatus,
+      taskProgressCallback: reportProgress ? _onProgress : null,
+    );
     _events = queue.events.listen(_onQueueEvent);
     _holds = queue.holdChanges.listen(_onHoldChange);
     await _files.trackTasksInGroup(group);
@@ -267,7 +288,8 @@ final class QueueTransfers {
     await _events?.cancel();
     await _holds?.cancel();
     if (_attached) {
-      _files.unregisterCallbacks(group: group, callback: _onStatus);
+      // The group is this object's alone, so remove all its callbacks.
+      _files.unregisterCallbacks(group: group);
     }
   }
 
@@ -281,6 +303,15 @@ final class QueueTransfers {
         update,
       ).catchError(_report),
     );
+  }
+
+  void _onProgress(TaskProgressUpdate update) {
+    if (_disposed) return;
+    // Negative values are status codes (failed, paused, ...), not progress.
+    if (update.progress < 0) return;
+    final id = TransferIds.queueTaskId(update.task.taskId);
+    if (id == null) return;
+    queue.reportProgress(id, update.progress);
   }
 
   Future<void> _apply(
