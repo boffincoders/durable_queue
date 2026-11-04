@@ -808,3 +808,6 @@ More recipes, from offline forms to background jobs: [Cookbook](https://github.c
 * Questions, feature ideas, and storage-integration requests: [GitHub Discussions](https://github.com/boffincoders/durable_queue/discussions).
 * Bugs: [issue tracker](https://github.com/boffincoders/durable_queue/issues).
 * Code and adapters: see [CONTRIBUTING.md](https://github.com/boffincoders/durable_queue/blob/main/CONTRIBUTING.md).
+* New contributors: [good first issues](https://github.com/boffincoders/durable_queue/labels/good%20first%20issue).
+
+If durable_queue saves you work, a like on pub.dev (the thumbs-up at the top of this page) or a star on [GitHub](https://github.com/boffincoders/durable_queue) helps other developers find it.

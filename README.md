@@ -135,6 +135,9 @@ ROADMAP.md                      what comes next
 * Questions and ideas: [GitHub Discussions](https://github.com/boffincoders/durable_queue/discussions)
 * Bugs: [issues](https://github.com/boffincoders/durable_queue/issues)
 * Code and adapters: [CONTRIBUTING.md](CONTRIBUTING.md)
+* New contributors: [good first issues](https://github.com/boffincoders/durable_queue/labels/good%20first%20issue)
+
+If durable_queue saves you work, a like on [pub.dev](https://pub.dev/packages/durable_queue) or a star on GitHub helps other developers find it.
 
 Licensed under the [MIT license](LICENSE).
 
