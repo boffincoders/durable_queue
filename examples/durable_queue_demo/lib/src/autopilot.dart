@@ -15,18 +15,34 @@ final class Autopilot {
   Timer? _timer;
 
   Future<void> start() async {
+    final scenario = await _scenario();
     try {
-      final scenario = await _get('/scenario');
-      if (scenario['action'] == 'enqueue') {
+      if (scenario?['action'] == 'enqueue') {
         await demo.addPhotos(
-          count: (scenario['count'] as int?) ?? 6,
+          count: (scenario!['count'] as int?) ?? 6,
           sizeKb: (scenario['sizeKb'] as int?) ?? 256,
         );
       }
     } on Object catch (error) {
-      stderr.writeln('autopilot: no scenario ($error)');
+      stderr.writeln('autopilot: enqueue failed ($error)');
     }
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _report());
+  }
+
+  /// Reads the scenario, trying again for up to a minute: right after a
+  /// simulator boots, the first requests can fail.
+  Future<Map<String, Object?>?> _scenario() async {
+    for (var attempt = 1; ; attempt++) {
+      try {
+        return await _get('/scenario');
+      } on Object catch (error) {
+        if (attempt == 30) {
+          stderr.writeln('autopilot: no scenario ($error)');
+          return null;
+        }
+        await Future<void>.delayed(const Duration(seconds: 2));
+      }
+    }
   }
 
   Future<void> _report() async {
