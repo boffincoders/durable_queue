@@ -1,3 +1,21 @@
+## 0.5.13
+
+Preparation for 1.0. No breaking changes; the items marked "1.0" change
+in that release.
+
+* New library `package:durable_queue/testing.dart` with `FakeQueueClock`.
+  1.0: the main library stops exporting `FakeQueueClock`; tests then add
+  this import. Until then the main import is enough.
+* `TaskTypeMetrics` fields are read through getters. Their setters are
+  deprecated and removed in 1.0; the numbers come from `QueueMetrics`.
+* `DurableQueue.newerVersionRecheck` is deprecated and removed in 1.0.
+* 1.0: `DurableQueue(failureHistory:)` will default to 5 instead of 0. With
+  `durable_queue_encryption`, use 0.1.2 or later, which encrypts the
+  history. Pass `failureHistory: 0` to keep today's behaviour.
+* Stability promises for 1.x, in the docs: the `QueueStorage` methods
+  (STORAGE.md), the set of `QueueEvent` types, and the `RetryPolicy` types
+  change only in a major version.
+
 ## 0.5.12
 
 New features, no breaking changes.

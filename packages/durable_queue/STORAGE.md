@@ -4,6 +4,10 @@
 
 [`storage_contract.dart`](https://github.com/boffincoders/durable_queue/blob/main/packages/durable_queue_test_support/lib/src/storage_contract.dart) (`queueStorageContractTests`) is the executable form of this contract. Adapters in this repository run it from the unpublished `durable_queue_test_support` package; adapters elsewhere can copy it. `durable_queue_sqlite` is a complete adapter to compare against.
 
+## Stability
+
+From 1.0, the `QueueStorage` methods and the stored record format change only in a major version. An adapter written for 1.0 keeps working with every 1.x release of `durable_queue`.
+
 ## Records
 
 Persist every `StoredTask` field. `StoredTask.toJson` / `StoredTask.fromJson` is the canonical encoding: ISO-8601 timestamps, retry policy JSON, and the task payload map.

@@ -8,43 +8,82 @@ final class TaskTypeMetrics {
   TaskTypeMetrics._();
 
   /// Tasks stored by `enqueue` or `retry`.
-  int enqueued = 0;
+  int get enqueued => _enqueued;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set enqueued(int value) => _enqueued = value;
+  int _enqueued = 0;
 
   /// Attempts started.
-  int started = 0;
+  int get started => _started;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set started(int value) => _started = value;
+  int _started = 0;
 
   /// Tasks completed.
-  int completed = 0;
+  int get completed => _completed;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set completed(int value) => _completed = value;
+  int _completed = 0;
 
   /// Tasks that failed for good.
-  int failed = 0;
+  int get failed => _failed;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set failed(int value) => _failed = value;
+  int _failed = 0;
 
   /// Attempts that failed and were scheduled to run again.
-  int retried = 0;
+  int get retried => _retried;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set retried(int value) => _retried = value;
+  int _retried = 0;
 
   /// Tasks cancelled, including expired ones.
-  int cancelled = 0;
+  int get cancelled => _cancelled;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set cancelled(int value) => _cancelled = value;
+  int _cancelled = 0;
 
   /// Times a task was made to wait for a gate or a rate limit.
-  int deferred = 0;
+  int get deferred => _deferred;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set deferred(int value) => _deferred = value;
+  int _deferred = 0;
 
   /// Attempts whose run time was measured.
-  int timedRuns = 0;
+  int get timedRuns => _timedRuns;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set timedRuns(int value) => _timedRuns = value;
+  int _timedRuns = 0;
 
   /// Sum of measured run times.
-  Duration totalRunTime = Duration.zero;
+  Duration get totalRunTime => _totalRunTime;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set totalRunTime(Duration value) => _totalRunTime = value;
+  Duration _totalRunTime = Duration.zero;
 
   /// Longest measured run time.
-  Duration maxRunTime = Duration.zero;
+  Duration get maxRunTime => _maxRunTime;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set maxRunTime(Duration value) => _maxRunTime = value;
+  Duration _maxRunTime = Duration.zero;
 
   /// Tasks whose wait before their first attempt was measured.
-  int timedWaits = 0;
+  int get timedWaits => _timedWaits;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set timedWaits(int value) => _timedWaits = value;
+  int _timedWaits = 0;
 
   /// Sum of measured waits before the first attempt.
-  Duration totalWaitTime = Duration.zero;
+  Duration get totalWaitTime => _totalWaitTime;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set totalWaitTime(Duration value) => _totalWaitTime = value;
+  Duration _totalWaitTime = Duration.zero;
 
   /// Longest measured wait before the first attempt.
-  Duration maxWaitTime = Duration.zero;
+  Duration get maxWaitTime => _maxWaitTime;
+  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
+  set maxWaitTime(Duration value) => _maxWaitTime = value;
+  Duration _maxWaitTime = Duration.zero;
 
   /// Average run time of an attempt, or null before one was measured.
   Duration? get averageRunTime =>
@@ -63,31 +102,31 @@ final class TaskTypeMetrics {
   }
 
   void _addRun(Duration run) {
-    timedRuns++;
-    totalRunTime += run;
-    if (run > maxRunTime) maxRunTime = run;
+    _timedRuns++;
+    _totalRunTime += run;
+    if (run > _maxRunTime) _maxRunTime = run;
   }
 
   void _addWait(Duration wait) {
-    timedWaits++;
-    totalWaitTime += wait;
-    if (wait > maxWaitTime) maxWaitTime = wait;
+    _timedWaits++;
+    _totalWaitTime += wait;
+    if (wait > maxWaitTime) _maxWaitTime = wait;
   }
 
   TaskTypeMetrics _copy() => TaskTypeMetrics._()
-    ..enqueued = enqueued
-    ..started = started
-    ..completed = completed
-    ..failed = failed
-    ..retried = retried
-    ..cancelled = cancelled
-    ..deferred = deferred
-    ..timedRuns = timedRuns
-    ..totalRunTime = totalRunTime
-    ..maxRunTime = maxRunTime
-    ..timedWaits = timedWaits
-    ..totalWaitTime = totalWaitTime
-    ..maxWaitTime = maxWaitTime;
+    .._enqueued = _enqueued
+    .._started = _started
+    .._completed = _completed
+    .._failed = _failed
+    .._retried = _retried
+    .._cancelled = _cancelled
+    .._deferred = _deferred
+    .._timedRuns = _timedRuns
+    .._totalRunTime = _totalRunTime
+    .._maxRunTime = _maxRunTime
+    .._timedWaits = _timedWaits
+    .._totalWaitTime = _totalWaitTime
+    .._maxWaitTime = _maxWaitTime;
 
   /// A JSON-encodable summary, with times in milliseconds.
   Map<String, Object?> toJson() => {
@@ -203,13 +242,13 @@ final class QueueMetrics {
 
     switch (event) {
       case TaskEnqueued(:final runAt):
-        each((m) => m.enqueued++);
+        each((m) => m._enqueued++);
         final at = event.occurredAt;
         _readyAt[event.taskId] = runAt != null && runAt.isAfter(at)
             ? runAt
             : at;
       case TaskStarted():
-        each((m) => m.started++);
+        each((m) => m._started++);
         _runStarts[event.taskId] = event.occurredAt;
         final ready = _readyAt.remove(event.taskId);
         if (ready != null) {
@@ -217,21 +256,21 @@ final class QueueMetrics {
           each((m) => m._addWait(wait));
         }
       case TaskRetryScheduled():
-        each((m) => m.retried++);
+        each((m) => m._retried++);
         _endRun(event, each);
       case TaskCompleted():
-        each((m) => m.completed++);
+        each((m) => m._completed++);
         _endRun(event, each);
       case TaskFailed():
-        each((m) => m.failed++);
+        each((m) => m._failed++);
         _endRun(event, each);
         _readyAt.remove(event.taskId);
       case TaskCancelled():
-        each((m) => m.cancelled++);
+        each((m) => m._cancelled++);
         _endRun(event, each);
         _readyAt.remove(event.taskId);
       case TaskDeferred():
-        each((m) => m.deferred++);
+        each((m) => m._deferred++);
         // A deferral after an error ends the attempt that hit the error.
         if (event.reason == DeferralReason.gateError) _endRun(event, each);
     }

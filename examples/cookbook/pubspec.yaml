@@ -10,7 +10,7 @@ environment:
 dependencies:
   background_downloader: ^9.6.4
   dio: ^5.11.1
-  durable_queue: ^0.5.12
+  durable_queue: ^0.5.13
   durable_queue_connectivity: ^0.1.0
   durable_queue_dio: ^0.2.1
   durable_queue_flutter: ^0.1.3

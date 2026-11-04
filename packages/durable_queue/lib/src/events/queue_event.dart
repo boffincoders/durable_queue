@@ -8,6 +8,10 @@ import '../task/task_failure.dart';
 /// The stream is broadcast and does not replay past events. Subscribe before
 /// calling [DurableQueue.start] or [DurableQueue.enqueue] if those events
 /// matter.
+///
+/// The set of event types is fixed: a `switch` over them stays exhaustive
+/// across 1.x releases. New kinds of information get their own stream, like
+/// [DurableQueue.holdChanges] and [DurableQueue.progress].
 sealed class QueueEvent {
   /// Creates an event that occurred at [occurredAt].
   const QueueEvent({

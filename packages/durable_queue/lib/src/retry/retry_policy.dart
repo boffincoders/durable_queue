@@ -8,6 +8,9 @@
 ///
 /// Computed delays are capped at [maxSchedulableDelay] so a retry cannot
 /// overflow [DateTime].
+///
+/// The policy types are fixed. For other timing, such as a server's
+/// `Retry-After`, use `register(retryDelay:)`.
 sealed class RetryPolicy {
   const RetryPolicy();
 

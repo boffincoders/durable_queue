@@ -166,7 +166,10 @@ final class DurableQueue {
 
   /// How long a task stored by a newer app version waits before it is
   /// checked again. See [TaskVersionException].
-  static const newerVersionRecheck = Duration(hours: 1);
+  @Deprecated('Internal detail; removed in 1.0.')
+  static const newerVersionRecheck = _newerVersionRecheck;
+
+  static const _newerVersionRecheck = Duration(hours: 1);
 
   /// Storage this queue reads and writes.
   final QueueStorage _storage;
@@ -2130,7 +2133,7 @@ final class DurableQueue {
     if (registered != null && task.payloadVersion > registered) {
       final wait = task.copyWith(
         updatedAt: now,
-        nextAttemptAt: now.add(newerVersionRecheck),
+        nextAttemptAt: now.add(_newerVersionRecheck),
         lastFailure: TaskFailure(
           error: TaskVersionException(
             taskId: task.id,
