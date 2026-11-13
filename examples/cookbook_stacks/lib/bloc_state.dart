@@ -4,8 +4,8 @@ import 'dart:async';
 
 import 'package:durable_queue/durable_queue.dart';
 import 'package:durable_queue_flutter/durable_queue_flutter.dart';
-import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// The tasks of one group, updated as they change.
 class QueueGroupCubit extends Cubit<List<StoredTask>> {
