@@ -16,7 +16,7 @@ We acknowledge reports within 3 working days and keep you informed until the pro
 
 ## Supported versions
 
-Fixes go into the latest published version of each package. The packages are before 1.0, so update to the latest version to receive them.
+Fixes go into the latest published version of each package. Within 1.x, updating to the latest version never needs code changes.
 
 | Package | Supported |
 | --- | --- |

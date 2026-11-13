@@ -190,7 +190,7 @@ await queue.purge(
 
 [`testing_handlers_test.dart`](../examples/cookbook/test/testing_handlers_test.dart)
 
-Give the queue a `FakeQueueClock` and move time yourself. `drain` runs what is ready and returns, which makes each step of a test explicit.
+Give the queue a `FakeQueueClock` from `package:durable_queue/testing.dart` and move time yourself. `drain` runs what is ready and returns, which makes each step of a test explicit.
 
 ```dart
 final clock = FakeQueueClock(DateTime.utc(2026, 1, 1));

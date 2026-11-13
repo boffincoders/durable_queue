@@ -6,6 +6,8 @@ Nothing here has a date. Each release says what it adds in the package's CHANGEL
 
 ## Available now
 
+Every package is at 1.0: breaking changes wait for 2.0.
+
 **Storing and running work**
 
 * Tasks stored before `enqueue` returns, in SQLite, drift, Hive, or memory, optionally encrypted with AES-256-GCM.
@@ -33,7 +35,6 @@ Nothing here has a date. Each release says what it adds in the package's CHANGEL
 
 ## Next
 
-* **A stable 1.0.** A review of the API names and defaults, then 1.0 releases of every package, after which breaking changes wait for 2.0.
 * **Encryption guidance.** Clear documentation of key storage, what happens when a key is lost, and which stored fields stay readable.
 * **A DevTools panel.** A `durable_queue_devtools` extension that shows tasks, their failures, progress, and metrics while you debug, with payloads hidden by default.
 

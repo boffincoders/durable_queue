@@ -9,80 +9,54 @@ final class TaskTypeMetrics {
 
   /// Tasks stored by `enqueue` or `retry`.
   int get enqueued => _enqueued;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set enqueued(int value) => _enqueued = value;
   int _enqueued = 0;
 
   /// Attempts started.
   int get started => _started;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set started(int value) => _started = value;
   int _started = 0;
 
   /// Tasks completed.
   int get completed => _completed;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set completed(int value) => _completed = value;
   int _completed = 0;
 
   /// Tasks that failed for good.
   int get failed => _failed;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set failed(int value) => _failed = value;
   int _failed = 0;
 
   /// Attempts that failed and were scheduled to run again.
   int get retried => _retried;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set retried(int value) => _retried = value;
   int _retried = 0;
 
   /// Tasks cancelled, including expired ones.
   int get cancelled => _cancelled;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set cancelled(int value) => _cancelled = value;
   int _cancelled = 0;
 
   /// Times a task was made to wait for a gate or a rate limit.
   int get deferred => _deferred;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set deferred(int value) => _deferred = value;
   int _deferred = 0;
 
   /// Attempts whose run time was measured.
   int get timedRuns => _timedRuns;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set timedRuns(int value) => _timedRuns = value;
   int _timedRuns = 0;
 
   /// Sum of measured run times.
   Duration get totalRunTime => _totalRunTime;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set totalRunTime(Duration value) => _totalRunTime = value;
   Duration _totalRunTime = Duration.zero;
 
   /// Longest measured run time.
   Duration get maxRunTime => _maxRunTime;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set maxRunTime(Duration value) => _maxRunTime = value;
   Duration _maxRunTime = Duration.zero;
 
   /// Tasks whose wait before their first attempt was measured.
   int get timedWaits => _timedWaits;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set timedWaits(int value) => _timedWaits = value;
   int _timedWaits = 0;
 
   /// Sum of measured waits before the first attempt.
   Duration get totalWaitTime => _totalWaitTime;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set totalWaitTime(Duration value) => _totalWaitTime = value;
   Duration _totalWaitTime = Duration.zero;
 
   /// Longest measured wait before the first attempt.
   Duration get maxWaitTime => _maxWaitTime;
-  @Deprecated('Read-only from 1.0; metrics are counted by QueueMetrics.')
-  set maxWaitTime(Duration value) => _maxWaitTime = value;
   Duration _maxWaitTime = Duration.zero;
 
   /// Average run time of an attempt, or null before one was measured.

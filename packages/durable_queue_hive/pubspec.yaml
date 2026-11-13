@@ -1,6 +1,6 @@
 name: durable_queue_hive
 description: Hive storage for durable_queue, on hive_ce. Tasks survive restarts and crashes on mobile, desktop, and web.
-version: 0.1.0
+version: 1.0.0
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_hive
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:
@@ -17,7 +17,7 @@ resolution: workspace
 
 dependencies:
   crypto: ^3.0.6
-  durable_queue: '>=0.5.4 <0.6.0'
+  durable_queue: ^1.0.0
   hive_ce: ^2.22.0
 
 dev_dependencies:

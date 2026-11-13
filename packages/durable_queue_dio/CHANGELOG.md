@@ -1,3 +1,8 @@
+## 1.0.0
+
+* First stable release, for `durable_queue` 1.0. No API changes from
+  0.2.2; breaking changes now wait for 2.0.
+
 ## 0.2.2
 
 * `registerHttpRequests(successStatusCodes:)`: statuses that complete the

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:background_downloader/background_downloader.dart';
 import 'package:durable_queue/durable_queue.dart' as dq;
+import 'package:durable_queue/testing.dart' as dq;
 import 'package:durable_queue_transfer/durable_queue_transfer.dart';
 import 'package:flutter_test/flutter_test.dart';
 

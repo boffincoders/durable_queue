@@ -1,6 +1,6 @@
 name: durable_queue
 description: 'A durable task queue for Flutter and Dart: persistent, retryable tasks that survive crashes and restarts, with priorities, dependencies, offline waiting, and recovery.'
-version: 0.5.13
+version: 1.0.0
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 documentation: https://boffincoders.github.io/durable_queue/

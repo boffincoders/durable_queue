@@ -49,7 +49,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.12
+  durable_queue: ^1.0.0
 ```
 
 ## Packages
@@ -590,13 +590,13 @@ final retried = await queue.retryFailed(); // or retryFailed(group: 'uploads')
 await queue.purge(statuses: {TaskStatus.failed}, olderThan: Duration(days: 30));
 ```
 
-To keep the errors of earlier attempts as well, create the queue with `failureHistory`:
+The queue also keeps the errors of earlier attempts. Choose how many with `failureHistory`:
 
 ```dart
-final queue = DurableQueue(storage: storage, failureHistory: 5);
+final queue = DurableQueue(storage: storage, failureHistory: 10);
 ```
 
-Each task then keeps up to that many failures in `StoredTask.failures`, oldest first: the error, stack trace, time, and attempt number of each. The history is stored with the task, so it survives restarts and a `retry`. It is off by default. With `durable_queue_encryption`, use 0.1.2 or later, which encrypts the history too.
+Each task then keeps up to that many failures in `StoredTask.failures`, oldest first: the error, stack trace, time, and attempt number of each. The history is stored with the task, so it survives restarts and a `retry`. The default is 5; `failureHistory: 0` keeps only the last failure. `durable_queue_encryption` encrypts the history too.
 
 `retry` keeps the task id, payload, keys, priority, group, and dependencies, and can take a new `retryPolicy`. It refuses tasks that are still active, refuses when another active task already holds the same deduplication key, and refuses when a dependency did not complete (retry that dependency first). Tasks cancelled because a dependency failed are not revived automatically. `delete` and `purge` only touch terminal tasks, and never remove a task that a waiting task still depends on.
 

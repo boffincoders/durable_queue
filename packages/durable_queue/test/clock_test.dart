@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:test/test.dart';
 
 void main() {

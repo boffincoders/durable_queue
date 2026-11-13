@@ -98,7 +98,7 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.12
+  durable_queue: ^1.0.0
 ```
 
 The [documentation site](https://boffincoders.github.io/durable_queue/) and the [`durable_queue` README](packages/durable_queue/README.md) have the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).

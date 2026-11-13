@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:durable_queue_sqlite/durable_queue_sqlite.dart';
 import 'package:test/test.dart';
 

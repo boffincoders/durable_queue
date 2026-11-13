@@ -4,7 +4,6 @@
 /// process wake up; call [DurableQueue.start] again on the next launch.
 library;
 
-export 'src/clock/fake_queue_clock.dart';
 export 'src/clock/queue_clock.dart';
 export 'src/errors.dart';
 export 'src/events/queue_event.dart';
