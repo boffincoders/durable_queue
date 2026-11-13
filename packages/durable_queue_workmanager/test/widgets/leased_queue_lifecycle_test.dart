@@ -1,6 +1,7 @@
 // Lifecycle tests. They need the Flutter SDK and run in CI with
 // `flutter test`.
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:durable_queue_workmanager/durable_queue_workmanager.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';

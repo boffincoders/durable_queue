@@ -1,5 +1,6 @@
 // Recipe: test retry behaviour without waiting, with FakeQueueClock.
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 final class Ping extends DurableTask {

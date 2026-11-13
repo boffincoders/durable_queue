@@ -4,8 +4,7 @@ import 'queue_clock.dart';
 
 /// Manually advanced clock for deterministic tests.
 ///
-/// From 1.0, import it from `package:durable_queue/testing.dart`; until
-/// then the main library exports it too.
+/// Import it from `package:durable_queue/testing.dart`.
 final class FakeQueueClock implements QueueClock {
   /// Creates a clock frozen at [initial].
   FakeQueueClock(DateTime initial) : _now = initial;

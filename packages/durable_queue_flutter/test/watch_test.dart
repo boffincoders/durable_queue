@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:durable_queue_flutter/durable_queue_flutter.dart';
 import 'package:flutter_test/flutter_test.dart';
 

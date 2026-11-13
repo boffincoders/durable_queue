@@ -1,6 +1,6 @@
 name: durable_queue_connectivity
 description: A network gate for durable_queue. Tasks that need the network wait while offline, without using attempts, and start when connectivity returns.
-version: 0.1.0
+version: 1.0.0
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_connectivity
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 topics:
@@ -19,7 +19,7 @@ environment:
 
 dependencies:
   connectivity_plus: ^7.3.2
-  durable_queue: ^0.5.0
+  durable_queue: ^1.0.0
   flutter:
     sdk: flutter
   http: ^1.6.0

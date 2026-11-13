@@ -1,4 +1,5 @@
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:test/test.dart';
 
 import 'support/harness.dart';
@@ -232,8 +233,14 @@ void main() {
       expect((await h.queue.getTask(id))!.failures, hasLength(2));
     });
 
-    test('is off by default', () async {
-      final h = QueueHarness();
+    test('defaults to 5', () async {
+      final queue = DurableQueue(storage: MemoryQueueStorage());
+      addTearDown(queue.close);
+      expect(queue.failureHistory, 5);
+    });
+
+    test('is off with failureHistory: 0', () async {
+      final h = QueueHarness(failureHistory: 0);
       addTearDown(h.queue.close);
       h.register(handler: (task, context) async => throw TemporaryFailure());
       final id = await h.queue.enqueue(ValueTask('a'));

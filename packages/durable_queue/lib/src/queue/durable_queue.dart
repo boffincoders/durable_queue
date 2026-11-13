@@ -104,8 +104,8 @@ final class DurableQueue {
   /// second; worker storage errors are reported through [storageErrors].
   /// [gateRecheckInterval] and [gateErrorDelay] must be positive; see their
   /// documentation. [failureHistory] is how many failures each task keeps in
-  /// [StoredTask.failures], from 0 (the default: only
-  /// [StoredTask.lastFailure]) to 20.
+  /// [StoredTask.failures], from 0 (only [StoredTask.lastFailure]) to 20;
+  /// the default is 5.
   DurableQueue({
     required QueueStorage storage,
     QueueClock? clock,
@@ -113,7 +113,7 @@ final class DurableQueue {
     this.storageRetryDelay = const Duration(seconds: 1),
     this.gateRecheckInterval = const Duration(minutes: 5),
     this.gateErrorDelay = const Duration(seconds: 30),
-    this.failureHistory = 0,
+    this.failureHistory = 5,
     RandomFraction? randomFraction,
     TaskIdGenerator? idGenerator,
   }) : _storage = storage,
@@ -159,16 +159,10 @@ final class DurableQueue {
 
   /// How many failures each task keeps in [StoredTask.failures]; 0 keeps
   /// only [StoredTask.lastFailure].
-  ///
-  /// With `durable_queue_encryption`, use 0.1.2 or later before setting it:
-  /// earlier versions do not encrypt the history.
   final int failureHistory;
 
   /// How long a task stored by a newer app version waits before it is
   /// checked again. See [TaskVersionException].
-  @Deprecated('Internal detail; removed in 1.0.')
-  static const newerVersionRecheck = _newerVersionRecheck;
-
   static const _newerVersionRecheck = Duration(hours: 1);
 
   /// Storage this queue reads and writes.

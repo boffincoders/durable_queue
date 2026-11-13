@@ -1,3 +1,22 @@
+## 1.0.0
+
+The first stable release. From here on, breaking changes wait for 2.0:
+the API, the `QueueStorage` methods, the stored record format, the set of
+`QueueEvent` types, and the `RetryPolicy` types stay as they are in 1.x.
+
+Breaking changes from 0.5.13:
+
+* `FakeQueueClock` is no longer exported by `package:durable_queue/durable_queue.dart`.
+  Tests import `package:durable_queue/testing.dart`.
+* `DurableQueue(failureHistory:)` defaults to 5: each task keeps its last
+  five failures in `StoredTask.failures`. Pass `failureHistory: 0` for the
+  0.x behaviour. With `durable_queue_encryption`, use 1.0.0, which
+  encrypts the history.
+* `TaskTypeMetrics` fields are read-only.
+* `DurableQueue.newerVersionRecheck` is removed.
+
+Stored tasks from every 0.x release load unchanged.
+
 ## 0.5.13
 
 Preparation for 1.0. No breaking changes; the items marked "1.0" change

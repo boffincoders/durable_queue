@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:durable_queue/durable_queue.dart';
+import 'package:durable_queue/testing.dart';
 import 'package:durable_queue_dio/durable_queue_dio.dart';
 import 'package:durable_queue_sqlite/durable_queue_sqlite.dart';
 import 'package:test/test.dart';

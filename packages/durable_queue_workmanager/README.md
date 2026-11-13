@@ -18,9 +18,9 @@ A starting `DurableQueue` treats every task still marked running as interrupted 
 
 ```yaml
 dependencies:
-  durable_queue: ^0.5.3
-  durable_queue_sqlite: ^0.2.2
-  durable_queue_workmanager: ^0.1.0
+  durable_queue: ^1.0.0
+  durable_queue_sqlite: ^1.0.0
+  durable_queue_workmanager: ^1.0.0
   workmanager: ^0.10.10
   path_provider: ^2.1.0
 ```

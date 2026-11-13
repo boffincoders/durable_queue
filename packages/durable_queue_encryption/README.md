@@ -10,7 +10,7 @@ Tasks often carry personal data: a message to send, an address, a form the user 
 | --- | --- |
 | Payload | AES-256-GCM ciphertext |
 | Error message and stack trace of the last failure | Inside the ciphertext; the stored error reads `[encrypted]` |
-| Error messages and stack traces of earlier failures (`failureHistory`) | Inside the ciphertext, the same way (since 0.1.2) |
+| Error messages and stack traces of earlier failures (`failureHistory`) | Inside the ciphertext, the same way |
 | Deduplication key and group | Inside the ciphertext, plus an HMAC-SHA256 tag used for lookups (turn off with `protectLookupKeys: false`) |
 | Id, type, status, attempts, times, priority, dependencies, idempotency key, hand-off reference | Plain, because the queue queries and orders by them. Keep secrets out of them. |
 
