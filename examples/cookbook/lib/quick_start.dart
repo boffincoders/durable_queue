@@ -11,7 +11,7 @@ import 'package:durable_queue_connectivity/durable_queue_connectivity.dart';
 import 'package:durable_queue_dio/durable_queue_dio.dart';
 import 'package:durable_queue_flutter/durable_queue_flutter.dart';
 import 'package:durable_queue_sqlite/durable_queue_sqlite.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
 
 Future<void> main() async {
