@@ -1,3 +1,17 @@
+## 1.0.1
+
+Documentation only.
+
+* The README is arranged for learning in three parts: the basics every app
+  needs, offline-first apps, and advanced features. A short list of
+  features per part, a table of which packages to add for what, "Less code
+  for common tasks" (HTTP requests without task classes, reusing existing
+  JSON models), and three things to know before shipping.
+* New section "One queue at a time: the app and background jobs": one
+  queue runs a storage at a time, and `durable_queue_workmanager`'s lease
+  lets the app and a background job take turns. Also a row in the
+  comparison table.
+
 ## 1.0.0
 
 The first stable release. From here on, breaking changes wait for 2.0:

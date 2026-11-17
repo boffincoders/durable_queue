@@ -127,5 +127,5 @@ The example posts to `https://httpbin.org/post`, which echoes what it receives. 
 
 * Send the same request only once, however often the user taps: [deduplication and idempotency](../packages/durable_queue/README.md#deduplication-and-idempotency).
 * Uploads that finish after the app is closed: [`durable_queue_transfer`](../packages/durable_queue_transfer/README.md).
-* Your own task types, retries, priorities, and dependencies: the [guide](../packages/durable_queue/README.md).
+* Your own task types, retries, and storage: [the basics](../packages/durable_queue/README.md#part-1-the-basics) in the guide. Then [offline-first apps](../packages/durable_queue/README.md#part-2-offline-first-apps) and, when you need them, [advanced](../packages/durable_queue/README.md#part-3-advanced) features.
 * More complete examples: the [cookbook](cookbook.md).

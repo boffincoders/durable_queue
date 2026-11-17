@@ -101,7 +101,7 @@ dependencies:
   durable_queue: ^1.0.0
 ```
 
-The [documentation site](https://boffincoders.github.io/durable_queue/) and the [`durable_queue` README](packages/durable_queue/README.md) have the quick start, an architecture diagram, examples, and the full feature guide. Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).
+New to it? Start with the [quick start](docs/quickstart.md): a working offline outbox in five minutes. Then the [guide](packages/durable_queue/README.md) goes in three parts: [the basics](packages/durable_queue/README.md#part-1-the-basics) every app needs, [offline-first apps](packages/durable_queue/README.md#part-2-offline-first-apps), and [advanced](packages/durable_queue/README.md#part-3-advanced) features for complex production apps. Everything is also on the [documentation site](https://boffincoders.github.io/durable_queue/). Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).
 
 ## Repository layout
 

@@ -42,6 +42,7 @@ Every package is at 1.0: breaking changes wait for 2.0.
 
 These wait until users ask for them:
 
+* **Code generation for task classes**: an optional generator that writes `type`, `toJson`, `fromJson`, and the `register` call from an annotated class. Today a task class is about ten lines, and HTTP requests need none.
 * **Several runners on one storage at once**, with a lease per task. Today `durable_queue_workmanager`'s lease lets the app and a background job take turns, which covers the common case.
 * **Adaptive concurrency** that follows failure rates or the network, after the fixed per-type limits have been in use for a while.
 * **More storage adapters.** Ask for the database you use.
