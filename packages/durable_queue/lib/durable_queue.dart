@@ -10,6 +10,7 @@ export 'src/events/queue_event.dart';
 export 'src/events/task_hold_changed.dart';
 export 'src/events/task_progress.dart';
 export 'src/gates/queue_gate.dart';
+export 'src/lease/queue_lease.dart';
 export 'src/limits/rate_limit.dart';
 export 'src/observe/queue_logger.dart';
 export 'src/observe/queue_metrics.dart';

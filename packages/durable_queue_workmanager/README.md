@@ -13,6 +13,7 @@ A starting `DurableQueue` treats every task still marked running as interrupted 
 * `LeasedQueueRunner` runs the app's queue only while it holds the lease. It stops the queue and releases the lease when the app goes to the background.
 * `QueueBackgroundWork` takes the lease in the background job, drains the queue for a limited time, and gives the lease back. If the app holds it, the job does nothing.
 * `FileQueueLease` keeps the lease in a file that both isolates see. A holder renews it while it runs; a lease that is not renewed in time (its holder was killed) can be taken over.
+* With `durable_queue_sqlite`, `SqliteQueueLease` keeps the lease in the queue's database instead: each check and change is one SQLite transaction, and there is no lease file. Rate limits are kept in that database too, so the background job does not start with empty limits.
 
 ## Install
 
@@ -59,6 +60,8 @@ Future<DurableQueue> openQueue() async {
 Future<QueueLease> openLease() async {
   final dir = await getApplicationSupportDirectory();
   return FileQueueLease('${dir.path}/queue.lease');
+  // Or, with durable_queue_sqlite, in the queue's database:
+  // return SqliteQueueLease.open('${dir.path}/queue.db');
 }
 
 final background = QueueBackgroundWork(

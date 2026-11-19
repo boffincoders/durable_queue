@@ -1,3 +1,7 @@
+## 1.0.1
+
+* Requires `durable_queue` 1.1.0 or later. No other changes.
+
 ## 1.0.0
 
 * First stable release, for `durable_queue` 1.0. No API changes from

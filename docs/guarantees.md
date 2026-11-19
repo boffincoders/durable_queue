@@ -39,7 +39,7 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Results of transfers while the app is closed.** A transfer that finishes while the app is closed is recorded by the system; its queue task completes, and the tasks after it run, the next time the app runs.
 
-**Rate limits across restarts.** Rate limits are kept in memory and start empty after a restart.
+**Rate limits across restarts.** With a storage that keeps queue state (`durable_queue_sqlite`, `durable_queue_drift`, the memory storage, and `durable_queue_encryption` over them), each limit's state and the slots reserved for deferred tasks are saved on every change, so limits still hold after a restart or in a background job. With other storages, such as `durable_queue_hive`, limits start empty after a restart. A limit whose `count` or `per` changed starts empty.
 
 **Exact timing.** A scheduled task or retry starts at or after its time, when the queue is running. Times use the device clock. An expired task is cancelled when the queue reaches it, not at the moment it expires.
 

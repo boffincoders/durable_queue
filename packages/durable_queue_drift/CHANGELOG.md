@@ -1,3 +1,10 @@
+## 1.1.0
+
+* Keeps queue state next to the tasks (`QueueStateStorage`), so rate
+  limits still hold after a restart. The values live in the existing
+  metadata table; the schema is unchanged.
+* Requires `durable_queue` 1.1.0 or later.
+
 ## 1.0.0
 
 * First stable release, for `durable_queue` 1.0. No API changes from

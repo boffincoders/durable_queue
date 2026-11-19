@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:durable_queue/durable_queue.dart';
 
 import 'lease_keeper.dart';
-import 'queue_lease.dart';
 
 /// Runs the app's [DurableQueue] only while it holds a [QueueLease], so a
 /// background job that drains the same storage never runs beside it.

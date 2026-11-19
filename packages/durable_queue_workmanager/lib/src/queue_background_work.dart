@@ -11,7 +11,6 @@ import 'package:workmanager/workmanager.dart'
         Workmanager;
 
 import 'background_drain.dart';
-import 'queue_lease.dart';
 
 /// Runs a durable_queue from Workmanager background jobs.
 ///

@@ -1,3 +1,15 @@
+## 1.1.0
+
+* Keeps queue state next to the tasks (`QueueStateStorage`), so rate
+  limits still hold after the app restarts or a background job opens the
+  queue. The values live in the existing metadata table; the schema is
+  unchanged.
+* `SqliteQueueLease`: a `QueueLease` kept in the queue's database, for
+  `durable_queue_workmanager`. Each check and change is one SQLite
+  transaction, so the app and a background job cannot both take it, and
+  there is no lease file to manage.
+* Requires `durable_queue` 1.1.0 or later.
+
 ## 1.0.0
 
 * First stable release, for `durable_queue` 1.0. No API changes from

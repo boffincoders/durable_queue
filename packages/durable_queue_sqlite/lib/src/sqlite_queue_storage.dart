@@ -31,7 +31,7 @@ import 'sql.dart';
 ///
 /// Only one `DurableQueue` should use a given database and table prefix at a
 /// time.
-final class SqliteQueueStorage implements QueueStorage {
+final class SqliteQueueStorage implements QueueStorage, QueueStateStorage {
   SqliteQueueStorage._(
     this._db, {
     required bool ownsDatabase,
@@ -225,6 +225,27 @@ final class SqliteQueueStorage implements QueueStorage {
 
   @override
   Future<StoredTask?> get(String id) async => _one(_sql.selectById, [id]);
+
+  /// Reads queue state, such as rate limits, kept in the metadata table.
+  @override
+  Future<String?> readState(String key) async {
+    _ensureOpen();
+    final rows = _db.select(_sql.selectState, [QueueSql.stateKey(key)]);
+    return rows.isEmpty ? null : rows.single['value'] as String;
+  }
+
+  /// Keeps queue state, such as rate limits, in the metadata table.
+  @override
+  Future<void> writeState(String key, String? value) async {
+    await _write(() {
+      final stored = QueueSql.stateKey(key);
+      if (value == null) {
+        _db.execute(_sql.deleteState, [stored]);
+      } else {
+        _db.execute(_sql.upsertState, [stored, value]);
+      }
+    });
+  }
 
   @override
   Future<List<StoredTask>> getAll() async => _many(_sql.selectAll);

@@ -313,14 +313,24 @@ const faq = [
         'back.',
   ),
   (
+    q: 'How do I send only the latest edit of a record?',
+    a:
+        'Enqueue each save with the record\'s deduplication key and '
+        '<code>onDuplicate: DuplicatePolicy.replace</code>. A save that has not been sent '
+        'yet gets the new data instead of a second task. If one is being sent, the new data '
+        'is sent right after it, so the server always ends with the latest version.',
+  ),
+  (
     q: 'How do I run background tasks with Workmanager and a queue?',
     a:
         'Use <code>durable_queue_workmanager</code>: create a <code>QueueBackgroundWork</code> '
         'with <code>openQueue</code> and <code>openLease</code>, call '
         '<code>background.schedule()</code> in <code>main</code> and '
         '<code>background.run(taskName)</code> in Workmanager\'s callback, and run the app\'s '
-        'queue through a <code>LeasedQueueRunner</code>. The lease keeps the app and the job '
-        'from running the queue at once. Android runs the jobs at most every 15 minutes, for '
+        'queue through a <code>LeasedQueueRunner</code>. The lease, kept in a file '
+        '(<code>FileQueueLease</code>) or in the SQLite database '
+        '(<code>SqliteQueueLease</code>), keeps the app and the job from running the queue '
+        'at once, and rate limits kept in SQLite still hold in the job. Android runs the jobs at most every 15 minutes, for '
         'up to about 10 minutes; iOS decides when, and gives each about 30 seconds.',
   ),
   (
@@ -339,7 +349,8 @@ const faq = [
         'AesGcmCipher(key))</code>, with a 32-byte key from '
         '<code>AesGcmCipher.generateKey()</code> kept in the platform\'s secure storage. '
         'Payloads, error messages, deduplication keys and groups are encrypted with '
-        'AES-256-GCM.',
+        'AES-256-GCM. A task that can no longer be decrypted, for example after its key '
+        'was lost, is set aside, so the rest of the queue keeps running.',
   ),
   (
     q: 'Does durable_queue need Flutter?',

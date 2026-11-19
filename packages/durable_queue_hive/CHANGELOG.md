@@ -1,3 +1,9 @@
+## 1.0.1
+
+* Requires `durable_queue` 1.1.0 or later. Hive storage does not keep queue
+  state (`QueueStateStorage`), so rate limits start empty after a restart,
+  as before.
+
 ## 1.0.0
 
 * First stable release, for `durable_queue` 1.0. No API changes from

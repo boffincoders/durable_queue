@@ -93,6 +93,18 @@ Every query the worker runs uses an index (the package's tests check SQLite's qu
 
 The schema is versioned in a `<prefix>meta` table. Opening tables created by a newer release of this package throws `StateError` rather than risking your data.
 
+## Rate limits and the background job lease
+
+The storage keeps the queue's rate-limit state in its metadata table, so limits still hold after the app restarts or a background job opens the queue.
+
+With [`durable_queue_workmanager`](https://pub.dev/packages/durable_queue_workmanager), the app and the background job take turns through a lease. `SqliteQueueLease` keeps it in the same database file:
+
+```dart
+final lease = SqliteQueueLease.open(path); // the path the storage uses
+```
+
+Each check and change of the lease is one SQLite transaction, so two runners cannot both take it. Create one per runner and `close()` it when done. Native platforms only.
+
 ## Things to know
 
 * `package:sqlite3` is synchronous. Each call runs on the calling isolate (on the web, the page's main thread). Queue operations touch one or a few rows, so this is quick; listing or purging very large numbers of tasks blocks while it runs.

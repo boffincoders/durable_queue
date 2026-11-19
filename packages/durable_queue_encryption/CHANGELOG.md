@@ -12,6 +12,10 @@
 * `recoveredTaskIds()`: the tasks that were set aside and can be read again,
   for example after the key was restored, to release with
   `DurableQueue.release`.
+* Forwards queue state (`QueueStateStorage`, such as rate limits) to the
+  wrapped storage, encrypted like the tasks. State that cannot be decrypted
+  reads as none, so the queue starts it empty.
+* Requires `durable_queue` 1.1.0 or later.
 
 ## 1.0.0
 

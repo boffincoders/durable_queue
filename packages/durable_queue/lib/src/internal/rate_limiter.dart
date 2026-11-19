@@ -46,4 +46,23 @@ final class RateLimiter {
 
   /// Number of keys tracked.
   int get size => _arrival.length;
+
+  /// Spacing between starts once the burst is used up.
+  Duration get interval => _interval;
+
+  /// How far ahead of the steady rate a burst may start.
+  Duration get tolerance => _tolerance;
+
+  /// The keys whose state differs from an unused key at [now], with their
+  /// theoretical arrival times.
+  Map<String?, DateTime> activeAt(DateTime now) => {
+    for (final MapEntry(:key, :value) in _arrival.entries)
+      if (value.isAfter(now)) key: value,
+  };
+
+  /// Restores [arrival] for [key], keeping a later one already tracked.
+  void restore(String? key, DateTime arrival) {
+    final current = _arrival[key];
+    if (current == null || current.isBefore(arrival)) _arrival[key] = arrival;
+  }
 }
