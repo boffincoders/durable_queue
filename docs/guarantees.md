@@ -22,7 +22,7 @@ This page says what the durable_queue packages promise, what they do not, and ho
 
 **Dependencies.** A task never starts before every task it depends on has completed. If a dependency fails or is cancelled, `onDependencyFailure` decides: cancel (default), fail, or run anyway. A crash between a task finishing and its result being written never leaves its dependents waiting forever.
 
-**Deduplication.** While a task with a given `deduplicationKey` is pending, waiting, running, or scheduled to retry, `enqueue` with the same key returns the existing task's id and adds nothing. Finished tasks do not block the key.
+**Deduplication.** While a task with a given `deduplicationKey` is pending, waiting, running, or scheduled to retry, `enqueue` with the same key returns the existing task's id and adds nothing, or, with `onDuplicate: DuplicatePolicy.replace`, gives the existing task the new payload if it has not started, and otherwise stores one task with it to run after the running one. Finished tasks do not block the key.
 
 **Cancellation.** Cancelling a queued, waiting, or scheduled task marks it cancelled at once; it will not start. A running handler is asked to stop (`context.isCancellationRequested`, `context.whenCancellationRequested`) and is not interrupted: if it returns normally, the task is completed. A task handed off to outside work is cancelled at once, and a `TaskCancelled` event tells whoever runs the outside work to stop it.
 

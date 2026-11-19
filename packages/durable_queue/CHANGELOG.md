@@ -1,3 +1,21 @@
+## 1.1.0
+
+* `enqueue(onDuplicate: DuplicatePolicy.replace)`: the latest version wins.
+  When an active task holds the deduplication key, the new payload is run
+  instead of being dropped:
+  * a task that has not started gets the new payload and keeps its id,
+    place in line, attempts, start time, and other settings;
+  * a running task finishes with the old payload, and a task with the new
+    payload is stored to run after it, whatever its outcome. Later calls
+    replace the payload of that waiting task.
+
+  `enqueue` returns the id of the task that will run the new payload. The
+  default, `DuplicatePolicy.keep`, is the behaviour of 1.0.
+* `TaskEnqueued.replaced`: true when the event reports a replaced payload
+  rather than a new task. `QueueMetrics` does not count those as enqueued,
+  and `QueueLogger` logs them as replaced. Code that counts `TaskEnqueued`
+  events itself should check this field.
+
 ## 1.0.1
 
 Documentation only.

@@ -18,6 +18,7 @@ import '../retry/retry_policy.dart';
 import '../schedule/recurring.dart';
 import '../storage/queue_storage.dart';
 import '../task/dependency_failure_policy.dart';
+import '../task/duplicate_policy.dart';
 import '../task/durable_task.dart';
 import '../task/stored_task.dart';
 import '../task/task_context.dart';
@@ -466,6 +467,12 @@ final class DurableQueue {
   /// after a terminal state. The new payload is not merged into the existing
   /// task.
   ///
+  /// Pass [onDuplicate] [DuplicatePolicy.replace] to run the new payload
+  /// instead, so the latest version wins: a task that has not started gets
+  /// the new payload and keeps its other settings, and a running one is
+  /// followed by a task with the new payload. This returns the id of the
+  /// task that will run it. See [DuplicatePolicy.replace].
+  ///
   /// [idempotencyKey] is stored and passed to the handler on [TaskContext].
   ///
   /// [retryPolicy] defaults to [RetryPolicy.none].
@@ -503,11 +510,14 @@ final class DurableQueue {
   /// [ArgumentError] if the payload is not JSON-encodable, a key, group,
   /// or dependency id is empty, both [runAt] and [delay] are given, or
   /// [delay] is negative, both [expiresAt] and [expiresAfter] are given, or
-  /// the expiry is not after both now and the start time.
+  /// the expiry is not after both now and the start time, or [onDuplicate]
+  /// is [DuplicatePolicy.replace] without a [deduplicationKey] or the key is
+  /// held by a task of another type.
   Future<String> enqueue(
     DurableTask task, {
     RetryPolicy? retryPolicy,
     String? deduplicationKey,
+    DuplicatePolicy onDuplicate = DuplicatePolicy.keep,
     String? idempotencyKey,
     int priority = 0,
     Iterable<String> dependsOn = const [],
@@ -520,11 +530,19 @@ final class DurableQueue {
     Duration? expiresAfter,
   }) async {
     _ensureOpen();
+    if (onDuplicate == DuplicatePolicy.replace && deduplicationKey == null) {
+      throw ArgumentError.value(
+        onDuplicate,
+        'onDuplicate',
+        'Needs a deduplicationKey',
+      );
+    }
     final start = _runAt(runAt, delay);
     final request = _prepare(
       task,
       retryPolicy: retryPolicy,
       deduplicationKey: deduplicationKey,
+      onDuplicate: onDuplicate,
       idempotencyKey: idempotencyKey,
       priority: priority,
       dependsOn: dependsOn,
@@ -730,6 +748,7 @@ final class DurableQueue {
     DurableTask task, {
     RetryPolicy? retryPolicy,
     String? deduplicationKey,
+    DuplicatePolicy onDuplicate = DuplicatePolicy.keep,
     String? idempotencyKey,
     required int priority,
     required Iterable<String> dependsOn,
@@ -758,6 +777,7 @@ final class DurableQueue {
       payload: _jsonPayload(task.toJson()),
       retryPolicy: retryPolicy ?? RetryPolicy.none(),
       deduplicationKey: deduplicationKey,
+      onDuplicate: onDuplicate,
       idempotencyKey: idempotencyKey,
       priority: priority,
       dependsOn: dependencies,
@@ -814,8 +834,80 @@ final class DurableQueue {
     final key = request.deduplicationKey;
     if (key != null) {
       final existing = await _storage.findActiveByDeduplicationKey(key);
-      if (existing != null) return existing.id;
+      if (existing != null) {
+        if (request.onDuplicate == DuplicatePolicy.keep) return existing.id;
+        return _replace(existing, request, events);
+      }
     }
+    return _insert(request, events);
+  }
+
+  /// Gives the payload of [request] to the active task [existing] holding
+  /// its deduplication key, for [DuplicatePolicy.replace]. Must run inside
+  /// [_lock].
+  Future<String> _replace(
+    StoredTask existing,
+    _EnqueueRequest request,
+    List<QueueEvent> events,
+  ) async {
+    final key = request.deduplicationKey!;
+    // Only one task holds a key, except the follow-up of a running task
+    // stored below. It is the one that runs last, so it gets the payload.
+    var target = existing;
+    for (final dependent in await _storage.getWaitingDependents(existing.id)) {
+      if (dependent.deduplicationKey == key) {
+        target = dependent;
+        break;
+      }
+    }
+    if (target.type != request.type) {
+      throw ArgumentError.value(
+        request.type,
+        'task',
+        'Deduplication key "$key" is held by task "${target.id}" of type '
+            '"${target.type}"',
+      );
+    }
+    if (target.status != TaskStatus.running) {
+      final now = _clock.now();
+      await _storage.update(
+        target.copyWith(
+          payload: request.payload,
+          payloadVersion: request.payloadVersion,
+          updatedAt: now,
+        ),
+      );
+      events.add(
+        TaskEnqueued(
+          taskId: target.id,
+          taskType: target.type,
+          occurredAt: now,
+          deduplicationKey: target.deduplicationKey,
+          idempotencyKey: target.idempotencyKey,
+          replaced: true,
+        ),
+      );
+      return target.id;
+    }
+    // The running attempt keeps its payload. The new one runs after it,
+    // whether it completes or not, unless the caller chose dependencies and
+    // a policy of their own.
+    return _insert(
+      request.withDependencies(
+        [target.id, ...request.dependsOn],
+        onDependencyFailure: request.dependsOn.isEmpty
+            ? DependencyFailurePolicy.run
+            : null,
+      ),
+      events,
+    );
+  }
+
+  /// Stores [request] as a new task. Must run inside [_lock].
+  Future<String> _insert(
+    _EnqueueRequest request,
+    List<QueueEvent> events,
+  ) async {
     for (final dependency in request.dependsOn) {
       if (await _storage.get(dependency) == null) {
         throw TaskNotFoundException(dependency);
@@ -3186,6 +3278,7 @@ final class _EnqueueRequest {
     required this.dependsOn,
     required this.onDependencyFailure,
     required this.group,
+    this.onDuplicate = DuplicatePolicy.keep,
     this.runAt,
     this.expiresAt,
   });
@@ -3194,6 +3287,7 @@ final class _EnqueueRequest {
   final Map<String, dynamic> payload;
   final RetryPolicy retryPolicy;
   final String? deduplicationKey;
+  final DuplicatePolicy onDuplicate;
   final String? idempotencyKey;
   final int priority;
   final List<String> dependsOn;
@@ -3203,16 +3297,20 @@ final class _EnqueueRequest {
   final DateTime? expiresAt;
   final int payloadVersion;
 
-  _EnqueueRequest withDependencies(List<String> dependencies) {
+  _EnqueueRequest withDependencies(
+    List<String> dependencies, {
+    DependencyFailurePolicy? onDependencyFailure,
+  }) {
     return _EnqueueRequest(
       type: type,
       payload: payload,
       retryPolicy: retryPolicy,
       deduplicationKey: deduplicationKey,
+      onDuplicate: onDuplicate,
       idempotencyKey: idempotencyKey,
       priority: priority,
-      dependsOn: List<String>.unmodifiable(dependencies),
-      onDependencyFailure: onDependencyFailure,
+      dependsOn: List<String>.unmodifiable(LinkedHashSet.of(dependencies)),
+      onDependencyFailure: onDependencyFailure ?? this.onDependencyFailure,
       group: group,
       runAt: runAt,
       expiresAt: expiresAt,
