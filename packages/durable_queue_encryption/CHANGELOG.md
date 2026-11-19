@@ -1,3 +1,18 @@
+## 1.1.0
+
+* A task that cannot be decrypted no longer stops the queue. Before, the
+  queue retried reading it forever, so a lost key or one changed record
+  stopped every task behind it.
+  * `getNextReady` sets such a task aside: it is held, with its encrypted
+    data unchanged, and `tasksSetAside` reports it.
+  * `get` returns null for it, and the lists and
+    `findActiveByDeduplicationKey` skip it, instead of throwing
+    `PayloadDecryptionException`. A limited `getByStatus` still returns up
+    to its limit of readable tasks.
+* `recoveredTaskIds()`: the tasks that were set aside and can be read again,
+  for example after the key was restored, to release with
+  `DurableQueue.release`.
+
 ## 1.0.0
 
 * First stable release, for `durable_queue` 1.0. No API changes from

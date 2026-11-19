@@ -147,16 +147,8 @@ void main() {
     final a = (await inner.get('a'))!;
     final b = (await inner.get('b'))!;
     await inner.update(b.copyWith(payload: a.payload));
-    expect(
-      storage.get('b'),
-      throwsA(
-        isA<PayloadDecryptionException>().having(
-          (e) => e.taskId,
-          'taskId',
-          'b',
-        ),
-      ),
-    );
+    expect(await storage.get('b'), isNull);
+    expect(await storage.unreadableTaskIds(), ['b']);
   });
 
   test('a changed record does not decrypt', () async {
@@ -169,7 +161,8 @@ void main() {
         payload: {...record.payload, 'data': base64.encode(data)},
       ),
     );
-    expect(storage.get('a'), throwsA(isA<PayloadDecryptionException>()));
+    expect(await storage.get('a'), isNull);
+    expect(await storage.unreadableTaskIds(), ['a']);
   });
 
   test('a malformed record or unknown version does not decrypt', () async {
@@ -178,13 +171,14 @@ void main() {
     await inner.update(
       record.copyWith(payload: {...record.payload, 'data': 7}),
     );
-    expect(storage.get('a'), throwsA(isA<PayloadDecryptionException>()));
+    expect(await storage.get('a'), isNull);
     await inner.update(
       record.copyWith(
         payload: {...record.payload, EncryptedQueueStorage.envelopeKey: 2},
       ),
     );
-    expect(storage.get('a'), throwsA(isA<PayloadDecryptionException>()));
+    expect(await storage.get('a'), isNull);
+    expect(await storage.unreadableTaskIds(), ['a']);
   });
 
   test('the wrong key does not decrypt; unreadable tasks can be found and '
@@ -194,13 +188,8 @@ void main() {
     final other = EncryptedQueueStorage(inner, cipher: AesGcmCipher(_key2));
     await other.save(storedTask(id: 'b'));
 
-    final error = await other
-        .get('a')
-        .then<Object?>((_) => null, onError: (Object e) => e);
-    expect(error, isA<PayloadDecryptionException>());
-    expect('$error', contains('task a'));
-    expect('$error', contains('key k1'));
-
+    expect(await other.get('a'), isNull);
+    expect((await other.getAll()).map((t) => t.id), ['b', 'plain-ok']);
     expect(await other.unreadableTaskIds(), ['a']);
     await other.delete('a');
     expect((await other.getAll()).map((t) => t.id), ['b', 'plain-ok']);
@@ -260,7 +249,7 @@ void main() {
       cipher: AesGcmCipher(_key1),
       readPlaintext: false,
     );
-    expect(strict.get('plain'), throwsA(isA<PayloadDecryptionException>()));
+    expect(await strict.get('plain'), isNull);
     expect(
       await strict.findActiveByDeduplicationKey('user@example.com'),
       isNull,
@@ -349,6 +338,183 @@ void main() {
     expect((await queue.getTask(id))!.status, TaskStatus.completed);
     expect((await queue.getTasks(group: 'notes')).single.id, id);
     await queue.close();
+  });
+
+  group('a task that cannot be decrypted', () {
+    DurableQueue noteQueue(QueueStorage on, List<String> seen) {
+      return DurableQueue(storage: on)..register<_Note>(
+        type: _Note.taskType,
+        decoder: (json) => _Note(json['text'] as String),
+        handler: (task, context) async => seen.add(task.text),
+      );
+    }
+
+    Future<void> corrupt(String id) async {
+      final record = (await inner.get(id))!;
+      final data = base64.decode(record.payload['data'] as String);
+      data[data.length ~/ 2] ^= 1;
+      await inner.update(
+        record.copyWith(
+          payload: {...record.payload, 'data': base64.encode(data)},
+        ),
+      );
+    }
+
+    test('is set aside, and the queue runs the tasks behind it', () async {
+      final seen = <String>[];
+      final queue = noteQueue(storage, seen);
+      final setAside = <PayloadDecryptionException>[];
+      final subscription = storage.tasksSetAside.listen(setAside.add);
+      final storageErrors = <QueueStorageFailure>[];
+      queue.storageErrors.listen(storageErrors.add);
+
+      final bad = await queue.enqueue(const _Note('first'));
+      await queue.enqueue(const _Note('second'));
+      await queue.enqueue(const _Note('third'));
+      await corrupt(bad);
+
+      final result = await queue.drain().timeout(const Duration(seconds: 5));
+      expect(result.completed, 2);
+      expect(seen, ['second', 'third']);
+      expect(storageErrors, isEmpty);
+      expect(setAside.map((e) => e.taskId), [bad]);
+      expect('${setAside.single}', contains('task $bad'));
+
+      // Its data is kept, held so that it is not selected again.
+      final raw = (await inner.get(bad))!;
+      expect(raw.held, isTrue);
+      expect(raw.status, TaskStatus.pending);
+      expect(raw.nextAttemptAt, StoredTask.heldNextAttemptAt);
+      expect(await storage.getNextReady(DateTime.utc(3000)), isNull);
+
+      // The queue does not list it.
+      expect(await queue.getTask(bad), isNull);
+      expect((await queue.getTasks()).length, 2);
+      expect(await storage.unreadableTaskIds(), [bad]);
+      expect(await storage.recoveredTaskIds(), isEmpty);
+
+      await subscription.cancel();
+      await queue.close();
+    });
+
+    test('runs once its key is restored and it is released', () async {
+      final lostKey = EncryptedQueueStorage(inner, cipher: AesGcmCipher(_key2));
+      final seen = <String>[];
+      final writer = noteQueue(storage, seen);
+      final id = await writer.enqueue(
+        const _Note('kept'),
+        delay: Duration.zero,
+      );
+      await writer.close();
+
+      // Opened with the wrong key: set aside, nothing runs.
+      final withoutKey = noteQueue(lostKey, seen);
+      await withoutKey.drain().timeout(const Duration(seconds: 5));
+      expect(seen, isEmpty);
+      expect(await lostKey.unreadableTaskIds(), [id]);
+      expect(await lostKey.recoveredTaskIds(), isEmpty);
+      await withoutKey.close();
+
+      // The right key again: the task can be read and released.
+      final restored = EncryptedQueueStorage(
+        inner,
+        cipher: AesGcmCipher(_key1),
+      );
+      expect(await restored.unreadableTaskIds(), isEmpty);
+      expect(await restored.recoveredTaskIds(), [id]);
+      final task = (await restored.get(id))!;
+      expect(task.held, isTrue);
+      expect(task.payload, {'text': 'kept'});
+
+      final queue = noteQueue(restored, seen);
+      expect(await queue.release(id), isTrue);
+      await queue.drain();
+      expect(seen, ['kept']);
+      expect((await queue.getTask(id))!.status, TaskStatus.completed);
+      expect(await restored.recoveredTaskIds(), isEmpty);
+      expect(
+        jsonEncode((await inner.get(id))!.toJson()),
+        isNot(contains('set_aside')),
+      );
+      await queue.close();
+    });
+
+    test('does not stop a task it depends on from finishing', () async {
+      final seen = <String>[];
+      final queue = noteQueue(storage, seen);
+      final first = await queue.enqueue(const _Note('first'));
+      final dependent = await queue.enqueue(
+        const _Note('dependent'),
+        dependsOn: [first],
+      );
+      final other = await queue.enqueue(const _Note('other'));
+      await corrupt(dependent);
+
+      await queue.drain().timeout(const Duration(seconds: 5));
+      expect(seen, ['first', 'other']);
+      expect((await queue.getTask(first))!.status, TaskStatus.completed);
+      expect((await queue.getTask(other))!.status, TaskStatus.completed);
+      expect(await storage.unreadableTaskIds(), [dependent]);
+      await queue.close();
+    });
+
+    test('does not use up a limited status query', () async {
+      final created = DateTime.utc(2026, 1, 1);
+      for (var i = 0; i < 5; i++) {
+        await storage.save(
+          storedTask(
+            id: 't$i',
+            status: TaskStatus.running,
+            attempts: 1,
+            createdAt: created.add(Duration(seconds: i)),
+            sequence: i,
+          ),
+        );
+      }
+      await corrupt('t0');
+      await corrupt('t1');
+      expect(
+        (await storage.getByStatus(
+          TaskStatus.running,
+          limit: 2,
+        )).map((t) => t.id),
+        ['t2', 't3'],
+      );
+      expect(
+        (await storage.getByStatus(
+          TaskStatus.running,
+          limit: 10,
+        )).map((t) => t.id),
+        ['t2', 't3', 't4'],
+      );
+    });
+
+    test('is skipped by deduplication lookups', () async {
+      await storage.save(
+        storedTask(
+          id: 'a',
+          deduplicationKey: 'same',
+          status: TaskStatus.pending,
+        ),
+      );
+      await corrupt('a');
+      expect(await storage.findActiveByDeduplicationKey('same'), isNull);
+    });
+
+    test('an unencrypted task is set aside and read again without the '
+        'marker', () async {
+      await inner.save(storedTask(id: 'plain', payload: {'v': 1}));
+      final strict = EncryptedQueueStorage(
+        inner,
+        cipher: AesGcmCipher(_key1),
+        readPlaintext: false,
+      );
+      expect(await strict.getNextReady(DateTime.utc(2027)), isNull);
+      expect((await inner.get('plain'))!.held, isTrue);
+
+      expect(await storage.recoveredTaskIds(), ['plain']);
+      expect((await storage.get('plain'))!.payload, {'v': 1});
+    });
   });
 }
 

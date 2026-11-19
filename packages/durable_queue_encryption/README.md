@@ -58,13 +58,30 @@ Future<List<int>> queueKey() async {
 }
 ```
 
-If the key is lost (for example, the database came back from a backup but the key did not), the tasks it encrypted cannot be read. Reading one throws `PayloadDecryptionException`, and a running queue reports it on `storageErrors` and keeps retrying. Before starting the queue, delete such tasks:
+## Tasks that cannot be decrypted
+
+If the key is lost (for example, the database came back from a backup but the key did not), or a record was changed, those tasks cannot be read. The queue leaves them out and keeps running the tasks it can read:
+
+* `getTask` returns null for them, and lists and counts skip them.
+* When one is next in line, it is set aside: held, as by `queue.hold`, with its encrypted data kept unchanged. `storage.tasksSetAside` reports it.
+
+If the key is gone for good, delete them:
 
 ```dart
 for (final id in await storage.unreadableTaskIds()) {
   await storage.delete(id);
 }
 ```
+
+If you get the key back, open the storage with it again and release the tasks that were set aside:
+
+```dart
+for (final id in await storage.recoveredTaskIds()) {
+  await queue.release(id);
+}
+```
+
+A task that was waiting for another task, and could not be read when that task finished, stays waiting once it can be read again. Cancel it and enqueue it again.
 
 ## Adding encryption to an existing app
 

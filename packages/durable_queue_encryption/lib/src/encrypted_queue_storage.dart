@@ -1,6 +1,7 @@
 /// @docImport 'aes_gcm_cipher.dart';
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:durable_queue/durable_queue.dart';
@@ -32,10 +33,22 @@ import 'payload_cipher.dart';
 /// status, attempt counts, times, priority, dependencies, idempotency key,
 /// and hand-off reference. Keep secrets out of those.
 ///
-/// Reading a task that cannot be decrypted throws
-/// [PayloadDecryptionException]. A queue that hits one reports it on
-/// `DurableQueue.storageErrors` and keeps retrying, so a lost key stops the
-/// queue: find such tasks with [unreadableTaskIds] and delete them.
+/// ## Tasks that cannot be decrypted
+///
+/// A task can become unreadable, for example after its key was lost or its
+/// record was changed. Such a task is left out, so the queue keeps running
+/// the tasks it can read:
+///
+/// * [get] returns null for it, and the lists ([getAll], [getByStatus],
+///   [getByGroup], ...) and [findActiveByDeduplicationKey] skip it.
+/// * When it is next in line to start, [getNextReady] sets it aside: it is
+///   held, as by `DurableQueue.hold`, and [tasksSetAside] reports it. Its
+///   encrypted data is kept unchanged.
+///
+/// [unreadableTaskIds] lists the tasks that cannot be read now. Delete them
+/// if their key is gone for good. If you restore the key, the tasks become
+/// readable again, and [recoveredTaskIds] lists the ones that were set aside
+/// so you can release them with `DurableQueue.release`.
 ///
 /// Every queue or connection that opens the same storage must use this
 /// wrapper with the same keys.
@@ -67,10 +80,20 @@ final class EncryptedQueueStorage
   static const _version = 1;
   static const _tagPrefix = 'dqe1:';
 
+  /// Added to the stored payload of a task set aside by [getNextReady].
+  /// Removed when the task is read, so the next write drops it.
+  static const _setAsideKey = 'durable_queue_encryption_set_aside';
+
   final QueueStorage _inner;
   final PayloadCipher _cipher;
   final bool _protectLookupKeys;
   final bool _readPlaintext;
+  final StreamController<PayloadDecryptionException> _setAside =
+      StreamController<PayloadDecryptionException>.broadcast();
+
+  /// Reports each task that [getNextReady] set aside because it could not be
+  /// decrypted, with the reason.
+  Stream<PayloadDecryptionException> get tasksSetAside => _setAside.stream;
 
   /// The wrapped storage. Records read from it directly are encrypted.
   QueueStorage get inner => _inner;
@@ -92,20 +115,59 @@ final class EncryptedQueueStorage
   @override
   Future<void> delete(String id) => _inner.delete(id);
 
+  /// Returns the task with [id], or null if it is not stored or cannot be
+  /// decrypted. See [unreadableTaskIds].
   @override
   Future<StoredTask?> get(String id) async => _openOrNull(await _inner.get(id));
 
   @override
   Future<List<StoredTask>> getPending() async =>
-      _openAll(await _inner.getPending());
+      _readable(await _inner.getPending());
 
   @override
-  Future<List<StoredTask>> getByStatus(TaskStatus status, {int? limit}) async =>
-      _openAll(await _inner.getByStatus(status, limit: limit));
+  Future<List<StoredTask>> getByStatus(TaskStatus status, {int? limit}) async {
+    if (limit == null) {
+      return _readable(await _inner.getByStatus(status));
+    }
+    // Skipped tasks must not use up the limit: ask for more until [limit]
+    // tasks can be read or the wrapped storage has no more.
+    var want = limit;
+    while (true) {
+      final stored = await _inner.getByStatus(status, limit: want);
+      final readable = await _readable(stored);
+      if (readable.length >= limit || stored.length < want) {
+        return readable.length > limit ? readable.sublist(0, limit) : readable;
+      }
+      want = limit + stored.length - readable.length;
+    }
+  }
 
+  /// Returns the next ready task that can be decrypted.
+  ///
+  /// A ready task that cannot be decrypted is set aside first: it is held,
+  /// as by `DurableQueue.hold`, so it is not returned again, and
+  /// [tasksSetAside] reports it.
   @override
-  Future<StoredTask?> getNextReady(DateTime now) async =>
-      _openOrNull(await _inner.getNextReady(now));
+  Future<StoredTask?> getNextReady(DateTime now) async {
+    while (true) {
+      final stored = await _inner.getNextReady(now);
+      if (stored == null) return null;
+      try {
+        return await _open(stored);
+      } on PayloadDecryptionException catch (error) {
+        await _inner.update(
+          stored.copyWith(
+            payload: {...stored.payload, _setAsideKey: true},
+            held: true,
+            releaseAt: stored.nextAttemptAt,
+            nextAttemptAt: StoredTask.heldNextAttemptAt,
+            updatedAt: now,
+          ),
+        );
+        if (!_setAside.isClosed) _setAside.add(error);
+      }
+    }
+  }
 
   @override
   Future<DateTime?> getNextWakeAt() => _inner.getNextWakeAt();
@@ -114,22 +176,22 @@ final class EncryptedQueueStorage
   Future<int> getMaxSequence() => _inner.getMaxSequence();
 
   @override
-  Future<List<StoredTask>> getAll() async => _openAll(await _inner.getAll());
+  Future<List<StoredTask>> getAll() async => _readable(await _inner.getAll());
 
   @override
   Future<List<StoredTask>> getWaitingDependents(String id) async =>
-      _openAll(await _inner.getWaitingDependents(id));
+      _readable(await _inner.getWaitingDependents(id));
 
   @override
   Future<StoredTask?> findActiveByDeduplicationKey(String key) async {
-    StoredTask? oldest;
+    final found = <StoredTask>[];
     for (final stored in _lookupValues(key)) {
-      final found = await _inner.findActiveByDeduplicationKey(stored);
-      if (found != null && (oldest == null || _compare(found, oldest) < 0)) {
-        oldest = found;
-      }
+      final task = await _inner.findActiveByDeduplicationKey(stored);
+      if (task != null) found.add(task);
     }
-    return _openOrNull(oldest);
+    found.sort(_compare);
+    final readable = await _readable(found);
+    return readable.isEmpty ? null : readable.first;
   }
 
   @override
@@ -144,7 +206,7 @@ final class EncryptedQueueStorage
       }
     }
     final tasks = byId.values.toList()..sort(_compare);
-    return _openAll(tasks);
+    return _readable(tasks);
   }
 
   /// Rewrites every stored task with the cipher's current key and lookup
@@ -163,16 +225,32 @@ final class EncryptedQueueStorage
   }
 
   /// Returns the ids of stored tasks that cannot be decrypted, for example
-  /// after the key was lost. Delete them with [delete] so the queue can
-  /// continue.
+  /// after the key was lost. The queue leaves them out; delete them with
+  /// [delete] if they cannot be recovered.
   Future<List<String>> unreadableTaskIds() async {
     final ids = <String>[];
     for (final stored in await _inner.getAll()) {
-      try {
-        await _open(stored);
-      } on PayloadDecryptionException {
-        ids.add(stored.id);
-      }
+      if (await _tryOpen(stored) == null) ids.add(stored.id);
+    }
+    return ids;
+  }
+
+  /// Returns the ids of tasks that [getNextReady] set aside because they
+  /// could not be decrypted and that can be read again, for example because
+  /// the key was restored.
+  ///
+  /// They are still held. Release each one to let it run:
+  ///
+  /// ```dart
+  /// for (final id in await storage.recoveredTaskIds()) {
+  ///   await queue.release(id);
+  /// }
+  /// ```
+  Future<List<String>> recoveredTaskIds() async {
+    final ids = <String>[];
+    for (final stored in await _inner.getAll()) {
+      if (stored.payload[_setAsideKey] != true || !stored.held) continue;
+      if (await _tryOpen(stored) != null) ids.add(stored.id);
     }
     return ids;
   }
@@ -251,18 +329,34 @@ final class EncryptedQueueStorage
   }
 
   Future<StoredTask?> _openOrNull(StoredTask? stored) async =>
-      stored == null ? null : _open(stored);
+      stored == null ? null : _tryOpen(stored);
 
-  Future<List<StoredTask>> _openAll(List<StoredTask> stored) async => [
-    for (final task in stored) await _open(task),
+  /// The decrypted task, or null if [stored] cannot be decrypted.
+  Future<StoredTask?> _tryOpen(StoredTask stored) async {
+    try {
+      return await _open(stored);
+    } on PayloadDecryptionException {
+      return null;
+    }
+  }
+
+  /// The tasks in [stored] that can be decrypted, in the same order.
+  Future<List<StoredTask>> _readable(List<StoredTask> stored) async => [
+    for (final task in stored) ?await _tryOpen(task),
   ];
 
   Future<StoredTask> _open(StoredTask stored) async {
     final payload = stored.payload;
     final version = payload[envelopeKey];
     if (version == null) {
-      if (_readPlaintext) return stored;
-      throw PayloadDecryptionException(stored.id, 'The task is not encrypted');
+      if (!_readPlaintext) {
+        throw PayloadDecryptionException(
+          stored.id,
+          'The task is not encrypted',
+        );
+      }
+      if (!payload.containsKey(_setAsideKey)) return stored;
+      return stored.copyWith(payload: {...payload}..remove(_setAsideKey));
     }
     if (version != _version) {
       throw PayloadDecryptionException(
