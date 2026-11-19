@@ -340,6 +340,23 @@ void main() {
     await queue.close();
   });
 
+  test(
+    'queue state is encrypted, and unreadable state reads as none',
+    () async {
+      const state = '{"version":1,"shared":{"api.example.com":1}}';
+      await storage.writeState('rate_limits', state);
+      final raw = (await inner.readState('rate_limits'))!;
+      expect(raw.contains('api.example.com'), isFalse);
+      expect(await storage.readState('rate_limits'), state);
+
+      final other = EncryptedQueueStorage(inner, cipher: AesGcmCipher(_key2));
+      expect(await other.readState('rate_limits'), isNull);
+
+      await storage.writeState('rate_limits', null);
+      expect(await inner.readState('rate_limits'), isNull);
+    },
+  );
+
   group('a task that cannot be decrypted', () {
     DurableQueue noteQueue(QueueStorage on, List<String> seen) {
       return DurableQueue(storage: on)..register<_Note>(

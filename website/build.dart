@@ -712,7 +712,7 @@ ${_table(['Where', 'What the test does', 'Result'], [
 <div class="card"><h3>Retries that make sense</h3><p>Fixed or exponential backoff with optional jitter, a <code>retryIf</code> filter, and <code>Retry-After</code> with Dio.</p></div>
 <div class="card"><h3>Dependencies and chains</h3><p>"Upload, then tell the server": a task starts only after the ones it depends on completed.</p></div>
 <div class="card"><h3>Waits for the network</h3><p>Tasks wait while offline without using attempts, and start when the connection returns.</p></div>
-<div class="card"><h3>Deduplication</h3><p>A deduplication key stops a double tap from queuing the same work twice.</p></div>
+<div class="card"><h3>Deduplication</h3><p>A deduplication key stops a double tap from queuing the same work twice, or keeps only the latest edit of a record.</p></div>
 <div class="card"><h3>Background transfers</h3><p>Uploads and downloads handed to the operating system keep going after the app is closed.</p></div>
 <div class="card"><h3>Encryption at rest</h3><p>Optional AES-256-GCM for stored payloads and error messages, with key rotation.</p></div>
 <div class="card"><h3>Priorities and rate limits</h3><p>Higher priority first, limits per task type or per key such as an API host.</p></div>
@@ -849,7 +849,7 @@ ${packages.map((p) => '  - [${p.name}](${Site.url}${p.url}) ${_version(p.dir)}${
 - A task never starts before the tasks it depends on have completed.
 - Not exactly once: if the app dies after a side effect but before the result is stored, the task runs again. Send the task's idempotency key so the server can drop the repeat.
 - The core queue runs while the app's process runs. durable_queue_transfer hands uploads and downloads to the system's background transfer service; durable_queue_workmanager runs the queue in Workmanager jobs, within what the operating system allows.
-- Rate limits are kept in memory and start empty after a restart.
+- Rate limits are saved with the tasks in SQLite and drift storage, so they hold after a restart; with other storages they start empty.
 - Full list: ${Site.url}guarantees/
 
 ## FAQ

@@ -616,7 +616,7 @@ queue.addRateLimit(
 );
 ```
 
-Up to `count` tasks may start back to back, then starts are spaced by `per / count`. A task that has to wait is deferred: it keeps its status, attempt count, and place in line, and gets a reserved slot, so it is rescheduled once rather than polled. Other task types keep running meanwhile. A task must satisfy every limit that applies to it. Limits live in memory and start empty after a restart.
+Up to `count` tasks may start back to back, then starts are spaced by `per / count`. A task that has to wait is deferred: it keeps its status, attempt count, and place in line, and gets a reserved slot, so it is rescheduled once rather than polled. Other task types keep running meanwhile. A task must satisfy every limit that applies to it. When the storage keeps queue state (`durable_queue_sqlite`, `durable_queue_drift`), limits are saved with the tasks and still hold after a restart or in a background job; with other storages they start empty after a restart.
 
 When a service asks you to slow down, hold a limit so every task in that bucket waits, not only the one that got the answer:
 
@@ -699,7 +699,7 @@ Most apps need a second runner only for background work: the app runs the queue 
 
 * `LeasedQueueRunner` runs the app's queue only while it holds the lease, and releases it when the app goes to the background.
 * `QueueBackgroundWork` takes the lease in the Workmanager job, drains the queue for a limited time, and gives the lease back. If the app holds the lease, the job does nothing.
-* `FileQueueLease` keeps the lease in a file that both isolates see. A lease whose holder was killed expires and can be taken over.
+* `FileQueueLease` keeps the lease in a file that both isolates see, and `durable_queue_sqlite`'s `SqliteQueueLease` keeps it in the queue's database. A lease whose holder was killed expires and can be taken over.
 * `QueueLease` is a small interface for keeping the lease elsewhere, and `drainWithLease` runs the background part with another scheduler.
 
 Share storage that several isolates can open, such as `durable_queue_sqlite`. Not supported: several queues running tasks from one storage at the same moment, for example a server cluster, which would need a lease per task; it is listed under "Considered" in the [roadmap](https://github.com/boffincoders/durable_queue/blob/main/ROADMAP.md). On the web, run the queue in one tab at a time, and `durable_queue_hive` can be opened by one isolate only.

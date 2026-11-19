@@ -7,4 +7,5 @@
 /// ```
 library;
 
+export 'src/sqlite_queue_lease.dart';
 export 'src/sqlite_queue_storage.dart';

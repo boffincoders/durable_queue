@@ -53,7 +53,7 @@ import 'payload_cipher.dart';
 /// Every queue or connection that opens the same storage must use this
 /// wrapper with the same keys.
 final class EncryptedQueueStorage
-    implements QueueStorage, QueueStorageCallGuard {
+    implements QueueStorage, QueueStorageCallGuard, QueueStateStorage {
   /// Wraps [inner], encrypting with [cipher].
   ///
   /// When [readPlaintext] is true, tasks stored before encryption was added
@@ -103,6 +103,53 @@ final class EncryptedQueueStorage
   @override
   void checkCall() {
     if (_inner case final QueueStorageCallGuard guard) guard.checkCall();
+  }
+
+  /// Reads queue state, such as rate limits, from [inner] and decrypts it.
+  /// Returns null when [inner] keeps no state or the value cannot be
+  /// decrypted, so the queue starts that state empty.
+  @override
+  Future<String?> readState(String key) async {
+    if (_inner case final QueueStateStorage state) {
+      final stored = await state.readState(key);
+      if (stored == null) return null;
+      try {
+        final envelope = jsonDecode(stored);
+        if (envelope is! Map || envelope[envelopeKey] != _version) {
+          return _readPlaintext ? stored : null;
+        }
+        final plaintext = await _cipher.decrypt(
+          base64.decode(envelope['data'] as String),
+          keyId: envelope['key'] as String,
+          associatedData: _stateAssociatedData(key),
+        );
+        return utf8.decode(plaintext);
+      } on Object {
+        return _readPlaintext && !stored.contains(envelopeKey) ? stored : null;
+      }
+    }
+    return null;
+  }
+
+  /// Encrypts queue state, such as rate limits, and keeps it in [inner].
+  /// Does nothing when [inner] keeps no state.
+  @override
+  Future<void> writeState(String key, String? value) async {
+    if (_inner case final QueueStateStorage state) {
+      if (value == null) return state.writeState(key, null);
+      final data = await _cipher.encrypt(
+        utf8.encode(value),
+        associatedData: _stateAssociatedData(key),
+      );
+      await state.writeState(
+        key,
+        jsonEncode({
+          envelopeKey: _version,
+          'key': _cipher.keyId,
+          'data': base64.encode(data),
+        }),
+      );
+    }
   }
 
   @override
@@ -421,6 +468,9 @@ final class EncryptedQueueStorage
 
   static List<int> _associatedData(String taskId) =>
       utf8.encode('durable_queue_encryption/v1/task/$taskId');
+
+  static List<int> _stateAssociatedData(String key) =>
+      utf8.encode('durable_queue_encryption/v1/state/$key');
 
   // The storage contract's order: createdAt, then sequence, then id.
   static int _compare(StoredTask a, StoredTask b) {

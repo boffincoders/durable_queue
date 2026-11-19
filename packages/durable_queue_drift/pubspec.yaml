@@ -1,6 +1,6 @@
 name: durable_queue_drift
 description: drift storage for durable_queue. Keeps queued tasks in your app's drift database, with indexed, transactional queries.
-version: 1.0.0
+version: 1.1.0
 repository: https://github.com/boffincoders/durable_queue/tree/main/packages/durable_queue_drift
 issue_tracker: https://github.com/boffincoders/durable_queue/issues
 documentation: https://boffincoders.github.io/durable_queue/packages/durable_queue_drift/
@@ -18,7 +18,7 @@ resolution: workspace
 
 dependencies:
   drift: ^2.35.1
-  durable_queue: ^1.0.0
+  durable_queue: ^1.1.0
 
 dev_dependencies:
   durable_queue_sqlite: ^1.0.0

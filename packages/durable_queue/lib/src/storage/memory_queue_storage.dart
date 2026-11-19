@@ -8,11 +8,25 @@ import 'queue_storage.dart';
 ///
 /// Records live until this instance is discarded and do not survive process
 /// death. Each operation updates all indexes synchronously in one isolate.
-final class MemoryQueueStorage implements QueueStorage {
+final class MemoryQueueStorage implements QueueStorage, QueueStateStorage {
   /// Creates an empty in-memory store.
   MemoryQueueStorage();
 
   final Map<String, StoredTask> _tasks = {};
+  final Map<String, String> _state = {};
+
+  @override
+  Future<String?> readState(String key) async => _state[key];
+
+  @override
+  Future<void> writeState(String key, String? value) async {
+    if (value == null) {
+      _state.remove(key);
+    } else {
+      _state[key] = value;
+    }
+  }
+
   final _byStatus = <TaskStatus, SplayTreeSet<StoredTask>>{};
   final _byKey = <String, SplayTreeSet<StoredTask>>{};
   final _byGroup = <String, SplayTreeSet<StoredTask>>{};

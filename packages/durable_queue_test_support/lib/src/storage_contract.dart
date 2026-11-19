@@ -426,4 +426,26 @@ void queueStorageContractTests(FutureOr<QueueStorage> Function() create) {
     expect((await storage.get('a'))!.failures, isEmpty);
     expect((await storage.get('a'))!.payloadVersion, 3);
   });
+
+  test('a state storage keeps, replaces, and removes values', () async {
+    // Let a storage that opens lazily finish opening.
+    expect(await storage.getMaxSequence(), 0);
+    if (storage is! QueueStateStorage) {
+      markTestSkipped('${storage.runtimeType} keeps no queue state');
+      return;
+    }
+    final state = storage as QueueStateStorage;
+    expect(await state.readState('rate_limits'), isNull);
+    await state.writeState('rate_limits', '{"version":1}');
+    await state.writeState('other', 'x');
+    expect(await state.readState('rate_limits'), '{"version":1}');
+    await state.writeState('rate_limits', '{"version":2}');
+    expect(await state.readState('rate_limits'), '{"version":2}');
+    await state.writeState('rate_limits', null);
+    expect(await state.readState('rate_limits'), isNull);
+    expect(await state.readState('other'), 'x');
+    // State is not a task.
+    expect(await storage.getAll(), isEmpty);
+    expect(await storage.getMaxSequence(), 0);
+  });
 }

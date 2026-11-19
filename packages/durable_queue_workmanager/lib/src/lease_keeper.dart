@@ -1,7 +1,5 @@
 import 'package:durable_queue/durable_queue.dart';
 
-import 'queue_lease.dart';
-
 /// Renews a held [QueueLease] every quarter of its ttl until [stop], and
 /// calls [onLost] once if a renewal reports that the lease is gone.
 ///

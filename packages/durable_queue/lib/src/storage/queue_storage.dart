@@ -110,3 +110,23 @@ abstract interface class QueueStorageCallGuard {
   /// the current context.
   void checkCall();
 }
+
+/// Optional for a [QueueStorage]: keeps small pieces of queue state next to
+/// the tasks, so they survive a restart.
+///
+/// `DurableQueue` keeps its rate-limit state here: when each bucket may
+/// start a task again, and the slots reserved for deferred tasks. With it,
+/// limits still hold after the app restarts or a background job opens the
+/// queue again. Without it, rate limits start empty after a restart.
+///
+/// Values are short JSON strings, written each time the state changes and
+/// read when the queue first starts. A storage that wraps another one
+/// should implement it and forward the calls when the wrapped storage
+/// implements it.
+abstract interface class QueueStateStorage {
+  /// Returns the value stored under [key], or null.
+  Future<String?> readState(String key);
+
+  /// Stores [value] under [key], or removes [key] when [value] is null.
+  Future<void> writeState(String key, String? value);
+}

@@ -15,6 +15,16 @@
   rather than a new task. `QueueMetrics` does not count those as enqueued,
   and `QueueLogger` logs them as replaced. Code that counts `TaskEnqueued`
   events itself should check this field.
+* Rate limits survive a restart. A storage that implements the new
+  optional `QueueStateStorage` interface (memory, `durable_queue_sqlite`,
+  `durable_queue_drift`, and `durable_queue_encryption` over them) keeps
+  each limit's state and the slots reserved for deferred tasks, so the app
+  after a restart, or a background job, does not start with empty limits.
+  A limit whose `count` or `per` changed starts empty.
+* `QueueLease` moved here from `durable_queue_workmanager`, which still
+  exports it, so that storages such as `durable_queue_sqlite` can
+  implement it.
+* The engine is split into smaller files. No behaviour changes.
 
 ## 1.0.1
 

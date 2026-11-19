@@ -29,7 +29,8 @@ import 'sql.dart';
 ///
 /// Works wherever the drift database runs, including the web. Only one
 /// `DurableQueue` should use a given database and table prefix at a time.
-final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
+final class DriftQueueStorage
+    implements QueueStorage, QueueStorageCallGuard, QueueStateStorage {
   DriftQueueStorage._(this._db, String tablePrefix)
     : _sql = QueueSql(tablePrefix);
 
@@ -108,6 +109,30 @@ final class DriftQueueStorage implements QueueStorage, QueueStorageCallGuard {
 
   @override
   Future<StoredTask?> get(String id) => _one(_sql.selectById, [id]);
+
+  /// Reads queue state, such as rate limits, kept in the metadata table.
+  @override
+  Future<String?> readState(String key) async {
+    _ensureOpen();
+    final rows = await _db
+        .customSelect(
+          _sql.selectState,
+          variables: [Variable<String>(QueueSql.stateKey(key))],
+        )
+        .get();
+    return rows.isEmpty ? null : rows.single.read<String>('value');
+  }
+
+  /// Keeps queue state, such as rate limits, in the metadata table.
+  @override
+  Future<void> writeState(String key, String? value) => _write(() async {
+    final stored = QueueSql.stateKey(key);
+    if (value == null) {
+      await _db.customStatement(_sql.deleteState, [stored]);
+    } else {
+      await _db.customStatement(_sql.upsertState, [stored, value]);
+    }
+  });
 
   @override
   Future<List<StoredTask>> getAll() => _many(_sql.selectAll);

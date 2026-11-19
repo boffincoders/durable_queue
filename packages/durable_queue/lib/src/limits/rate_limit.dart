@@ -6,7 +6,12 @@ import '../task/stored_task.dart';
 /// the service the limit protects. Up to [count] tasks may start back to back
 /// after a quiet period; after that, starts are spaced by `per / count`.
 ///
-/// Limits are kept in memory. After a restart they start empty.
+/// Limits are kept in memory. When the storage implements
+/// `QueueStateStorage`, as `durable_queue_sqlite` and `durable_queue_drift`
+/// do, their state is also saved there, so they still hold after a restart
+/// or in a background job that opens the queue again. Otherwise they start
+/// empty after a restart. A limit whose `count` or `per` changed starts
+/// empty too.
 final class RateLimit {
   /// Creates a limit of [count] starts per [per].
   ///

@@ -1,3 +1,14 @@
+## 1.1.0
+
+* `QueueLease` now lives in `durable_queue`, so storages can implement it.
+  It is still exported from this package; existing code keeps compiling.
+* `durable_queue_sqlite`'s new `SqliteQueueLease` can replace
+  `FileQueueLease` when the queue is stored in SQLite.
+* With `durable_queue` 1.1.0, rate limits are kept in storages that support
+  it (SQLite, drift), so a background job no longer starts with empty
+  limits.
+* Requires `durable_queue` 1.1.0 or later.
+
 ## 1.0.0
 
 * First stable release, for `durable_queue` 1.0. No API changes from

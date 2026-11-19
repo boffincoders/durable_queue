@@ -44,6 +44,21 @@ final class QueueSql {
   /// Reads the schema version.
   String get selectVersion => "SELECT value FROM $meta WHERE key = 'schema'";
 
+  /// Reads a value kept for `QueueStateStorage`.
+  String get selectState => 'SELECT value FROM $meta WHERE key = ?';
+
+  /// Writes a value kept for `QueueStateStorage`.
+  String get upsertState =>
+      'INSERT INTO $meta (key, value) VALUES (?, ?) '
+      'ON CONFLICT (key) DO UPDATE SET value = excluded.value';
+
+  /// Removes a value kept for `QueueStateStorage`.
+  String get deleteState => 'DELETE FROM $meta WHERE key = ?';
+
+  /// The metadata key of a `QueueStateStorage` value. The prefix keeps it
+  /// apart from the schema version.
+  static String stateKey(String key) => 'state:$key';
+
   /// Writes the schema version.
   String get upsertVersion =>
       "INSERT INTO $meta (key, value) VALUES ('schema', ?) "
