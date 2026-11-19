@@ -23,7 +23,7 @@ Apps constantly start work that must not be lost: uploading a photo, sending a m
 ## Real-world use cases
 
 * **Media upload.** Retry network failures with backoff, fail fast on a rejected file, and send an idempotency key so the server never stores a photo twice. See `example/image_upload.dart`.
-* **Offline-first edits.** Queue each change while offline, deduplicate repeated saves of the same record, and let the queue drain when connectivity returns.
+* **Offline-first edits.** Queue each change while offline, keep only the latest save of each record (`onDuplicate: DuplicatePolicy.replace`), and let the queue drain when connectivity returns.
 * **Multi-step workflows.** Upload, then process, then notify, as a chain where a failed step cancels the rest. See `example/orchestration.dart`.
 * **Background sync.** Group related sync tasks so they can be listed or cancelled together on logout.
 * **Priority work.** Let a chat message jump ahead of analytics uploads that are already waiting.
@@ -407,6 +407,23 @@ await queue.enqueue(
 ```
 
 If a task with that deduplication key is already `pending`, `waiting`, `running`, or `retryScheduled`, `enqueue` returns the existing id and leaves it unchanged. A completed, failed, or cancelled task does not block the key.
+
+### The latest version wins
+
+When each save of a record replaces the last one, such as a profile edit or a draft, pass `onDuplicate: DuplicatePolicy.replace`:
+
+```dart
+await queue.enqueue(
+  SaveProfileTask(profile),
+  deduplicationKey: 'profile:${profile.id}',
+  onDuplicate: DuplicatePolicy.replace,
+);
+```
+
+* If the task with that key has not started, its payload is replaced. It keeps its id, place in line, attempts, start time, and other settings. `queue.events` reports a `TaskEnqueued` with `replaced: true`.
+* If it is running, that attempt finishes with the old payload, and a task with the new payload is stored to run after it, even if the running attempt fails. Later saves replace the payload of that waiting task, so at most two tasks hold the key and the latest version runs last.
+
+`enqueue` returns the id of the task that will run the new payload. The key must belong to a task of the same type.
 
 The idempotency key is stored and exposed on `TaskContext`. The handler decides how to send it. The same key does not, by itself, collapse two tasks.
 

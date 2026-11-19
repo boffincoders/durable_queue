@@ -113,6 +113,10 @@ final class QueueLogger {
   void _onEvent(QueueEvent event) {
     final task = '${event.taskType} ${event.taskId}';
     final (level, message) = switch (event) {
+      TaskEnqueued(replaced: true) => (
+        QueueLogLevel.debug,
+        'replaced the payload of $task',
+      ),
       TaskEnqueued(:final runAt) => (
         QueueLogLevel.debug,
         'enqueued $task'

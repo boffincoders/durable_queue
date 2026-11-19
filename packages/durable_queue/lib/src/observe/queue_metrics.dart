@@ -215,6 +215,9 @@ final class QueueMetrics {
     }
 
     switch (event) {
+      case TaskEnqueued(replaced: true):
+        // Only the payload of a stored task changed.
+        break;
       case TaskEnqueued(:final runAt):
         each((m) => m._enqueued++);
         final at = event.occurredAt;

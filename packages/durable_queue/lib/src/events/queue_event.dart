@@ -30,7 +30,9 @@ sealed class QueueEvent {
   final DateTime occurredAt;
 }
 
-/// A new task was stored.
+/// A new task was stored, a finished task was queued again by
+/// `DurableQueue.retry`, or a waiting task's payload was replaced (see
+/// [replaced]).
 final class TaskEnqueued extends QueueEvent {
   /// Creates an enqueued event.
   const TaskEnqueued({
@@ -40,11 +42,18 @@ final class TaskEnqueued extends QueueEvent {
     this.deduplicationKey,
     this.idempotencyKey,
     this.runAt,
+    this.replaced = false,
   });
 
   /// Earliest start time requested with `enqueue(runAt:)` or
   /// `enqueue(delay:)`, or null to start as soon as possible.
   final DateTime? runAt;
+
+  /// Whether no task was stored, but the payload of the existing task
+  /// [taskId] was replaced, by `enqueue(onDuplicate:
+  /// DuplicatePolicy.replace)`. The task keeps its start time, so [runAt]
+  /// is null.
+  final bool replaced;
 
   /// Deduplication key stored with the task, if any.
   final String? deduplicationKey;
