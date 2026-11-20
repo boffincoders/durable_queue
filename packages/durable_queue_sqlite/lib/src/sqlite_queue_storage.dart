@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:durable_queue/durable_queue.dart';
@@ -31,6 +32,13 @@ import 'sql.dart';
 ///
 /// Only one `DurableQueue` should use a given database and table prefix at a
 /// time.
+///
+/// A row whose record cannot be read, for example after the file was damaged
+/// or edited by hand, does not stop the queue. [get] returns null for it, the
+/// lists skip it, and when it is next in line [getNextReady] sets it aside:
+/// its row stays as it is but is no longer selected, and [tasksSetAside]
+/// reports its id. [unreadableTaskIds] lists such rows; remove them with
+/// [delete].
 final class SqliteQueueStorage implements QueueStorage, QueueStateStorage {
   SqliteQueueStorage._(
     this._db, {
@@ -175,6 +183,7 @@ final class SqliteQueueStorage implements QueueStorage, QueueStateStorage {
   final Future<void> Function()? _release;
   final QueueSql _sql;
   var _closed = false;
+  final _setAside = StreamController<String>.broadcast();
 
   /// Whether [close] has been called.
   bool get isClosed => _closed;
@@ -186,6 +195,7 @@ final class SqliteQueueStorage implements QueueStorage, QueueStateStorage {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    await _setAside.close();
     if (_ownsDatabase) {
       _db.close();
       await _release?.call();
@@ -259,19 +269,72 @@ final class SqliteQueueStorage implements QueueStorage, QueueStateStorage {
       throw ArgumentError.value(limit, 'limit', 'Must be positive');
     }
     if (limit == null) return _many(_sql.selectByStatus, [status.name]);
-    return _many(_sql.selectByStatus + QueueSql.limitClause, [
-      status.name,
-      limit,
-    ]);
+    // Rows that cannot be read must not use up the limit.
+    var want = limit;
+    while (true) {
+      _ensureOpen();
+      final rows = _db.select(_sql.selectByStatus + QueueSql.limitClause, [
+        status.name,
+        want,
+      ]);
+      final tasks = [for (final row in rows) ?_tryDecode(row['record'])];
+      if (tasks.length >= limit || rows.length < want) {
+        return List<StoredTask>.unmodifiable(tasks.take(limit));
+      }
+      want = limit + rows.length - tasks.length;
+    }
+  }
+
+  /// Returns the next ready task whose record can be read. A ready row that
+  /// cannot be read is set aside first, so it is not returned again, and
+  /// [tasksSetAside] reports it.
+  @override
+  Future<StoredTask?> getNextReady(DateTime now) async {
+    _ensureOpen();
+    while (true) {
+      final rows = _db.select(_sql.selectNextReady, [
+        now.microsecondsSinceEpoch,
+      ]);
+      if (rows.isEmpty) return null;
+      final id = rows.first['id'] as String;
+      final task = _tryDecode(rows.first['record']);
+      if (task != null) return task;
+      await _write(() {
+        _db.execute(_sql.setAside, [
+          StoredTask.heldNextAttemptAt.microsecondsSinceEpoch,
+          id,
+        ]);
+      });
+      if (!_setAside.isClosed) _setAside.add(id);
+    }
   }
 
   @override
-  Future<StoredTask?> getNextReady(DateTime now) async =>
-      _one(_sql.selectNextReady, [now.microsecondsSinceEpoch]);
+  Future<DateTime?> getNextWakeAt() async {
+    _ensureOpen();
+    final rows = _db.select(_sql.selectNextWake);
+    if (rows.isEmpty) return null;
+    final task = _tryDecode(rows.first['record']);
+    if (task != null) return task.nextAttemptAt;
+    return DateTime.fromMicrosecondsSinceEpoch(
+      rows.first['next_attempt_at_us'] as int,
+      isUtc: true,
+    );
+  }
 
-  @override
-  Future<DateTime?> getNextWakeAt() async =>
-      _one(_sql.selectNextWake)?.nextAttemptAt;
+  /// Ids of rows whose record cannot be read, in enqueue order. The queue
+  /// leaves them out; delete them with [delete].
+  Future<List<String>> unreadableTaskIds() async {
+    _ensureOpen();
+    return [
+      for (final row in _db.select(_sql.selectAllRecords))
+        if (_tryDecode(row['record']) == null) row['id'] as String,
+    ];
+  }
+
+  /// Reports the id of each row that [getNextReady] set aside because its
+  /// record could not be read.
+  Stream<String> get tasksSetAside => _setAside.stream;
 
   @override
   Future<int> getMaxSequence() async {
@@ -380,17 +443,28 @@ final class SqliteQueueStorage implements QueueStorage, QueueStateStorage {
     jsonEncode(task.toJson()),
   ];
 
+  /// The first row's task, or null when there is none or its record cannot
+  /// be read.
   StoredTask? _one(String sql, [List<Object?> parameters = const []]) {
     _ensureOpen();
     final rows = _db.select(sql, parameters);
-    return rows.isEmpty ? null : _decode(rows.first['record']);
+    return rows.isEmpty ? null : _tryDecode(rows.first['record']);
   }
 
+  /// The rows' tasks, skipping records that cannot be read.
   List<StoredTask> _many(String sql, [List<Object?> parameters = const []]) {
     _ensureOpen();
-    return List<StoredTask>.unmodifiable(
-      _db.select(sql, parameters).map((row) => _decode(row['record'])),
-    );
+    return List<StoredTask>.unmodifiable([
+      for (final row in _db.select(sql, parameters)) ?_tryDecode(row['record']),
+    ]);
+  }
+
+  static StoredTask? _tryDecode(Object? record) {
+    try {
+      return _decode(record);
+    } on Object {
+      return null;
+    }
   }
 
   static StoredTask _decode(Object? record) {

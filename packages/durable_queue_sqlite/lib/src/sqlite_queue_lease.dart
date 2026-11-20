@@ -27,9 +27,10 @@ import 'sqlite_queue_storage.dart';
 /// There is no window between reading the lease and taking it, and no guard
 /// file to clean up after a runner that died.
 ///
-/// Each [SqliteQueueLease] is one holder, with its own connection to the
-/// database. Create one per runner, do not share it between isolates, and
-/// [close] it when the runner is done.
+/// Each [SqliteQueueLease] is one holder. Create one per runner and do not
+/// share it between isolates. It opens a connection only for each check or
+/// change and closes it afterwards, so a runner that never calls [close],
+/// such as a Workmanager job, leaves nothing open.
 ///
 /// Like any lease that expires, it depends on the device clock and is
 /// limited by [ttl]: if a holder is frozen for longer than [ttl] while it
@@ -39,7 +40,6 @@ import 'sqlite_queue_storage.dart';
 /// Native platforms only.
 final class SqliteQueueLease implements QueueLease {
   SqliteQueueLease._(
-    this._db,
     this.path,
     String tablePrefix,
     this.ttl,
@@ -74,11 +74,10 @@ final class SqliteQueueLease implements QueueLease {
     final opened = platform.openFile(path);
     try {
       opened.database.execute(QueueSql(tablePrefix).createMeta);
-    } catch (_) {
+    } finally {
       opened.database.close();
-      rethrow;
     }
-    return SqliteQueueLease._(opened.database, path, tablePrefix, ttl, now);
+    return SqliteQueueLease._(path, tablePrefix, ttl, now);
   }
 
   /// The database file that keeps the lease.
@@ -87,7 +86,6 @@ final class SqliteQueueLease implements QueueLease {
   @override
   final Duration ttl;
 
-  final CommonDatabase _db;
   final QueueSql _sql;
   final DateTime Function() _now;
   final String _owner;
@@ -104,45 +102,42 @@ final class SqliteQueueLease implements QueueLease {
   }
 
   @override
-  Future<bool> tryAcquire() async => _transaction(() {
-    final current = _read();
+  Future<bool> tryAcquire() async => _transaction((db) {
+    final current = _read(db);
     final now = _now();
     if (current != null &&
         current.owner != _owner &&
         current.expiresAt.isAfter(now)) {
       return false;
     }
-    _write(now);
+    _write(db, now);
     return true;
   });
 
   @override
-  Future<bool> renew() async => _transaction(() {
+  Future<bool> renew() async => _transaction((db) {
     final now = _now();
-    if (!_holds(_read(), now)) return false;
-    _write(now);
+    if (!_holds(_read(db), now)) return false;
+    _write(db, now);
     return true;
   });
 
   @override
-  Future<void> release() async => _transaction(() {
+  Future<void> release() async => _transaction((db) {
     // An expired lease may be being taken over; leave it.
-    if (_holds(_read(), _now())) _db.execute(_sql.deleteState, [_key]);
+    if (_holds(_read(db), _now())) db.execute(_sql.deleteState, [_key]);
   });
 
-  /// Closes this lease's connection. Release the lease first if it is held.
-  /// Afterwards every method throws [StateError].
-  void close() {
-    if (_closed) return;
-    _closed = true;
-    _db.close();
-  }
+  /// Stops using this lease. Release it first if it is held. Afterwards
+  /// every method throws [StateError]. Holds no connection, so calling it
+  /// is optional.
+  void close() => _closed = true;
 
   bool _holds(({String owner, DateTime expiresAt})? lease, DateTime now) =>
       lease != null && lease.owner == _owner && lease.expiresAt.isAfter(now);
 
-  ({String owner, DateTime expiresAt})? _read() {
-    final rows = _db.select(_sql.selectState, [_key]);
+  ({String owner, DateTime expiresAt})? _read(CommonDatabase db) {
+    final rows = db.select(_sql.selectState, [_key]);
     if (rows.isEmpty) return null;
     try {
       final data = jsonDecode(rows.single['value'] as String);
@@ -158,8 +153,8 @@ final class SqliteQueueLease implements QueueLease {
     return null;
   }
 
-  void _write(DateTime now) {
-    _db.execute(_sql.upsertState, [
+  void _write(CommonDatabase db, DateTime now) {
+    db.execute(_sql.upsertState, [
       _key,
       jsonEncode({
         'owner': _owner,
@@ -168,18 +163,23 @@ final class SqliteQueueLease implements QueueLease {
     ]);
   }
 
-  T _transaction<T>(T Function() body) {
+  T _transaction<T>(T Function(CommonDatabase db) body) {
     if (_closed) throw StateError('SqliteQueueLease is closed');
-    // IMMEDIATE takes the write lock before reading, so two runners cannot
-    // both see the lease free.
-    _db.execute('BEGIN IMMEDIATE');
+    final db = platform.openFile(path).database;
     try {
-      final result = body();
-      _db.execute('COMMIT');
-      return result;
-    } catch (_) {
-      _db.execute('ROLLBACK');
-      rethrow;
+      // IMMEDIATE takes the write lock before reading, so two runners
+      // cannot both see the lease free.
+      db.execute('BEGIN IMMEDIATE');
+      try {
+        final result = body(db);
+        db.execute('COMMIT');
+        return result;
+      } catch (_) {
+        db.execute('ROLLBACK');
+        rethrow;
+      }
+    } finally {
+      db.close();
     }
   }
 }

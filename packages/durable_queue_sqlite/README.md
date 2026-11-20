@@ -14,8 +14,8 @@ Everything else (tasks, retries, priorities, dependencies, groups) works exactly
 
 ```yaml
 dependencies:
-  durable_queue: ^1.0.0
-  durable_queue_sqlite: ^1.0.0
+  durable_queue: ^1.1.1
+  durable_queue_sqlite: ^1.2.0
 ```
 
 SQLite itself comes from [`package:sqlite3`](https://pub.dev/packages/sqlite3) 3.x, which bundles a compiled SQLite with your app through Dart build hooks. You do not need `sqlite3_flutter_libs`. To use the operating system's SQLite or an encrypted build instead, see the [`sqlite3` hook options](https://github.com/simolus3/sqlite3.dart/blob/main/sqlite3/doc/hook.md).
@@ -110,6 +110,7 @@ Each check and change of the lease is one SQLite transaction, so two runners can
 * `package:sqlite3` is synchronous. Each call runs on the calling isolate (on the web, the page's main thread). Queue operations touch one or a few rows, so this is quick; listing or purging very large numbers of tasks blocks while it runs.
 * Payloads are stored as plain JSON. The database is not encrypted unless you configure an encrypted SQLite build.
 * Persistence is not background execution: the queue runs while your app runs. Call `start()` on the next launch.
+* A row whose record cannot be read, for example after the file was damaged or edited by hand, does not stop the queue. The queue leaves it out, and when it is next in line the storage sets it aside, so the tasks behind it run; `tasksSetAside` reports its id. `storage.unreadableTaskIds()` lists such rows; delete them with `storage.delete(id)` (`queue.delete` reports them as not found).
 
 ## Example
 

@@ -163,4 +163,50 @@ void main() {
     await h.queue.start();
     await expectLater(h.queue.drain(), throwsStateError);
   });
+
+  test('stop during a drain ends it without starting more tasks', () async {
+    final h = QueueHarness();
+    final release = Completer<void>();
+    final started = <String>[];
+    h.register(
+      handler: (task, context) async {
+        started.add(task.value);
+        if (task.value == 'first') await release.future;
+      },
+    );
+    await h.queue.enqueue(ValueTask('first'));
+    await h.queue.enqueue(ValueTask('second'));
+
+    // No time limit: before the fix this drain never returned.
+    final drained = h.queue.drain();
+    await h.until(() => started.isNotEmpty);
+    final stopped = h.queue.stop();
+    release.complete();
+    final result = await drained.timeout(const Duration(seconds: 5));
+    await stopped;
+
+    expect(started, ['first']);
+    expect(result.completed, 1);
+    expect(result.reason, DrainStopReason.idle);
+    expect(h.queue.runState, QueueRunState.idle);
+    expect((await h.queue.getTasks(status: TaskStatus.pending)), hasLength(1));
+  });
+
+  test(
+    'stop during an idle wait ends a drain that waits for later work',
+    () async {
+      final h = QueueHarness();
+      h.register();
+      await h.queue.enqueue(
+        ValueTask('later'),
+        delay: const Duration(hours: 1),
+      );
+      final drained = h.queue.drain(waitForScheduled: true);
+      await Future<void>.delayed(Duration.zero);
+      await h.queue.stop();
+      final result = await drained.timeout(const Duration(seconds: 5));
+      expect(result.started, 0);
+      expect(result.nextWakeAt, isNotNull);
+    },
+  );
 }

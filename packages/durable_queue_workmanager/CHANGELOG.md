@@ -1,3 +1,12 @@
+## 1.1.1
+
+* Fix: a background drain that loses its lease, for example after the job
+  was frozen for longer than the lease ttl while the app took over, now
+  stops its queue: no further task starts. Before, it kept starting tasks
+  while another runner could own the storage.
+* Requires `durable_queue` 1.1.1 or later, for `drain` ending when the
+  queue is stopped.
+
 ## 1.1.0
 
 * `QueueLease` now lives in `durable_queue`, so storages can implement it.

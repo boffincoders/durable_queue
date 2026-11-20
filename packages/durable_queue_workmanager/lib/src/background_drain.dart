@@ -19,7 +19,8 @@ final class LeasedDrainResult {
 
   /// Whether the lease could not be renewed while the drain ran, so another
   /// runner may have started the same storage in the meantime. This means
-  /// the drain was frozen for longer than the lease ttl.
+  /// the drain was frozen for longer than the lease ttl. The drain then
+  /// stopped: no task started after the loss was noticed.
   final bool leaseLost;
 
   /// When stored work is next due (see [DrainResult.nextWakeAt]), or null.
@@ -46,7 +47,9 @@ final class LeasedDrainResult {
 /// * [closeQueue] runs when the drain is over, also after errors. It
 ///   defaults to `queue.close()`. Use it to close the storage as well.
 /// * The lease is renewed every quarter of its ttl while the drain runs, by
-///   [clock].
+///   [clock]. If it cannot be renewed, another runner may own the storage
+///   now: the queue is stopped, so no further task starts, and the result
+///   reports [LeasedDrainResult.leaseLost].
 ///
 /// Errors from [openQueue], the drain, and [closeQueue] are passed on; the
 /// lease is released either way.
@@ -60,9 +63,16 @@ Future<LeasedDrainResult> drainWithLease({
 }) async {
   if (!await lease.tryAcquire()) return const LeasedDrainResult.skipped();
   var lost = false;
-  final keeper = LeaseKeeper(lease, clock, () => lost = true)..start();
+  DurableQueue? opened;
+  final keeper = LeaseKeeper(lease, clock, () {
+    lost = true;
+    // Another runner may own the storage now: start nothing new. The drain
+    // ends once running handlers finish.
+    final queue = opened;
+    if (queue != null && !queue.isClosed) unawaited(queue.stop());
+  })..start();
   try {
-    final queue = await openQueue();
+    final queue = opened = await openQueue();
     final DrainResult drain;
     try {
       drain = await queue.drain(

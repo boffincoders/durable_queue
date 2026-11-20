@@ -47,6 +47,7 @@ A stored task is as durable as the rest of your drift database: with drift's def
 * Only one `DurableQueue` should use a database and table prefix at a time.
 * drift's stream queries (`watch()`) on your own tables are not affected by queue writes, and queue tables do not appear in drift's generated code. Read tasks through the queue (`getTasks`, `watchGroup` from `durable_queue_flutter`).
 * If you check your schema with `drift_dev`'s schema validation, the queue tables show up as extra tables.
+* A row whose record cannot be read, for example after the file was damaged or edited by hand, does not stop the queue. The queue leaves it out, and when it is next in line the storage sets it aside, so the tasks behind it run; `tasksSetAside` reports its id. `storage.unreadableTaskIds()` lists such rows; delete them with `storage.delete(id)` (`queue.delete` reports them as not found).
 
 ## Encryption
 

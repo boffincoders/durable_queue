@@ -66,7 +66,7 @@ The features come in three layers. Most apps need only the first.
 
 ```yaml
 dependencies:
-  durable_queue: ^1.0.0
+  durable_queue: ^1.1.1
 ```
 
 ## Packages

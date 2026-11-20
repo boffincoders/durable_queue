@@ -7,9 +7,9 @@
 ```yaml
 dependencies:
   dio: ^5.11.1
-  durable_queue: ^1.0.0
-  durable_queue_dio: ^1.0.0
-  durable_queue_sqlite: ^1.0.0 # optional: keep requests across restarts
+  durable_queue: ^1.1.1
+  durable_queue_dio: ^1.0.1
+  durable_queue_sqlite: ^1.2.0 # optional: keep requests across restarts
 ```
 
 ## Queue an HTTP request

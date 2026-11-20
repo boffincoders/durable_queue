@@ -245,4 +245,65 @@ void main() {
     await settle(tester);
     await queue.close();
   });
+
+  testWidgets('changing pauseInBackground keeps a closeOnDispose queue open', (
+    tester,
+  ) async {
+    final queue = newQueue();
+    Widget scope({required bool pause}) => Directionality(
+      textDirection: TextDirection.ltr,
+      child: DurableQueueScope(
+        queue: queue,
+        pauseInBackground: pause,
+        closeOnDispose: true,
+        child: const SizedBox(),
+      ),
+    );
+    await tester.pumpWidget(scope(pause: true));
+    await settle(tester);
+    await tester.pumpWidget(scope(pause: false));
+    await settle(tester);
+    expect(queue.isClosed, isFalse, reason: 'the scope still uses the queue');
+    expect(queue.runState, QueueRunState.running);
+
+    await tester.pumpWidget(const SizedBox());
+    await settle(tester);
+    expect(queue.isClosed, isTrue, reason: 'closed when the scope goes away');
+  });
+
+  testWidgets(
+    'QueueTaskBuilder never shows another task after its id changes',
+    (tester) async {
+      final queue = newQueue();
+      final a = await queue.enqueue(Note('a'));
+      final b = await queue.enqueue(Note('b'));
+      final shown = <(String, String?)>[];
+      Widget builder(String id) => app(
+        queue,
+        QueueTaskBuilder(
+          taskId: id,
+          builder: (context, task) {
+            shown.add((id, task?.id));
+            return const SizedBox();
+          },
+        ),
+        pause: false,
+      );
+      await tester.pumpWidget(builder(a));
+      await settle(tester);
+      await tester.pumpWidget(builder(b));
+      await settle(tester);
+      for (final (id, taskId) in shown) {
+        expect(
+          taskId == null || taskId == id,
+          isTrue,
+          reason: '$id got $taskId',
+        );
+      }
+      expect(shown.last, (b, b));
+      await tester.pumpWidget(const SizedBox());
+      await settle(tester);
+      await queue.close();
+    },
+  );
 }

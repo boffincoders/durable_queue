@@ -97,6 +97,28 @@ void main() {
       },
     );
 
+    test(
+      'a change reported during the start check wins over the check',
+      () async {
+        final network = StreamController<bool>();
+        final check = Completer<bool>();
+        final gate = NetworkGate(
+          networkChanges: network.stream,
+          checkNetwork: () => check.future,
+        );
+        final started = gate.start();
+        await Future<void>.delayed(Duration.zero);
+        // The device came online after the check read "offline".
+        network.add(true);
+        await Future<void>.delayed(Duration.zero);
+        check.complete(false);
+        await started;
+        expect(gate.isOpen, isTrue);
+        await gate.dispose();
+        await network.close();
+      },
+    );
+
     test('a failing check or stream error keeps the last state', () async {
       var fail = true;
       final network = StreamController<bool>();

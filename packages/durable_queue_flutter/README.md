@@ -6,8 +6,8 @@ Flutter integration for [`durable_queue`](https://pub.dev/packages/durable_queue
 
 ```yaml
 dependencies:
-  durable_queue: ^1.0.0
-  durable_queue_flutter: ^1.0.0
+  durable_queue: ^1.1.1
+  durable_queue_flutter: ^1.0.2
 ```
 
 Requires Flutter 3.13 or later.

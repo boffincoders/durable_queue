@@ -7,6 +7,9 @@
   idempotency keys answered with the first result and never applied the
   newer version. Give each version its own key, for example the record id
   and a revision number; the README shows how.
+* Fix: calling `stop()` while `drain()` ran left the drain waiting forever
+  when it had no time limit, and until the limit otherwise. The drain now
+  ends once running handlers finish, with `DrainStopReason.idle`.
 
 ## 1.1.0
 
