@@ -2,8 +2,9 @@
 # Builds the demo, installs it on the running emulator, and runs the kill
 # test. Run from examples/durable_queue_demo.
 set -euxo pipefail
+source tool/retry_on_network_error.sh
 bash tool/prepare_platforms.sh
-flutter build apk --debug \
+retry_on_network_error flutter build apk --debug \
   --dart-define=DEMO_SERVER=http://10.0.2.2:8080 \
   --dart-define=DEMO_AUTOPILOT=true
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
