@@ -416,14 +416,17 @@ When each save of a record replaces the last one, such as a profile edit or a dr
 await queue.enqueue(
   SaveProfileTask(profile),
   deduplicationKey: 'profile:${profile.id}',
+  idempotencyKey: 'profile:${profile.id}:${profile.revision}',
   onDuplicate: DuplicatePolicy.replace,
 );
 ```
 
-* If the task with that key has not started, its payload is replaced. It keeps its id, place in line, attempts, start time, and other settings. `queue.events` reports a `TaskEnqueued` with `replaced: true`.
+* If the task with that key has not started, its payload is replaced. It keeps its id, place in line, attempts, start time, and other settings, and takes the idempotency key of the new call. `queue.events` reports a `TaskEnqueued` with `replaced: true`.
 * If it is running, that attempt finishes with the old payload, and a task with the new payload is stored to run after it, even if the running attempt fails. Later saves replace the payload of that waiting task, so at most two tasks hold the key and the latest version runs last.
 
 `enqueue` returns the id of the task that will run the new payload. The key must belong to a task of the same type.
+
+Give each version its own idempotency key, as above, not one key per record. A task waiting to retry may already have reached the server, and a server that honours idempotency keys answers a repeated key with the first result: it would never apply the newer version.
 
 The idempotency key is stored and exposed on `TaskContext`. The handler decides how to send it. The same key does not, by itself, collapse two tasks.
 

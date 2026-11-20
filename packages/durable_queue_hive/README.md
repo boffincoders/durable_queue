@@ -45,6 +45,7 @@ If the app dies in the middle of a write, Hive drops the incomplete entry when t
 * **One isolate.** Open the box in one isolate only. Hive must not open a box from two isolates at once, and the view lives in the isolate that opened it. A Workmanager background job runs in another isolate, so with `durable_queue_workmanager` use [`durable_queue_sqlite`](https://pub.dev/packages/durable_queue_sqlite) instead.
 * **Memory.** All tasks are held in memory while the storage is open. That suits queues of hundreds or a few thousand tasks; purge finished tasks you no longer need (`DurableQueue.purge`). For very large queues, use `durable_queue_sqlite`.
 * **A dedicated box.** Opening a box that holds anything other than task records throws `FormatException`.
+* **Rate limits start empty after a restart.** Hive storage does not keep queue state (`QueueStateStorage`), so `register(rateLimit:)` and `addRateLimit` limits are kept in memory only. To keep them across restarts, use `durable_queue_sqlite` or `durable_queue_drift`.
 
 ## Encryption
 

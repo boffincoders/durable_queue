@@ -194,6 +194,63 @@ void main() {
     await h.queue.stop();
   });
 
+  test(
+    'a task waiting to retry takes the idempotency key of the new call',
+    () async {
+      final h = QueueHarness();
+      final sent = <(String, String?)>[];
+      h.register(
+        handler: (task, context) async {
+          sent.add((task.value, context.idempotencyKey));
+          // The first attempt reached the server, then timed out.
+          if (sent.length == 1) throw TemporaryFailure();
+        },
+      );
+      final id = await h.queue.enqueue(
+        ValueTask('rev 1'),
+        deduplicationKey: 'profile',
+        idempotencyKey: 'profile:1',
+        retryPolicy: RetryPolicy.fixed(
+          maxAttempts: 3,
+          delay: const Duration(minutes: 1),
+        ),
+      );
+      await h.queue.drain();
+      expect((await h.queue.getTask(id))!.status, TaskStatus.retryScheduled);
+
+      await h.queue.enqueue(
+        ValueTask('rev 2'),
+        deduplicationKey: 'profile',
+        idempotencyKey: 'profile:2',
+        onDuplicate: replace,
+      );
+      final replaced = (await h.queue.getTask(id))!;
+      expect(replaced.idempotencyKey, 'profile:2');
+      expect(replaced.attempts, 1);
+      expect(h.of<TaskEnqueued>().last.idempotencyKey, 'profile:2');
+
+      h.clock.advance(const Duration(minutes: 1));
+      await h.queue.drain();
+      expect(sent, [('rev 1', 'profile:1'), ('rev 2', 'profile:2')]);
+    },
+  );
+
+  test('a replace without an idempotency key clears the old one', () async {
+    final h = QueueHarness();
+    h.register();
+    final id = await h.queue.enqueue(
+      ValueTask('a'),
+      deduplicationKey: 'k',
+      idempotencyKey: 'old',
+    );
+    await h.queue.enqueue(
+      ValueTask('b'),
+      deduplicationKey: 'k',
+      onDuplicate: replace,
+    );
+    expect((await h.queue.getTask(id))!.idempotencyKey, isNull);
+  });
+
   test('a held task keeps its hold', () async {
     final h = QueueHarness();
     h.register();

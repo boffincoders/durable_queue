@@ -1,3 +1,13 @@
+## 1.1.1
+
+Documentation only.
+
+* Says what an unreadable task means to the queue: `queue.delete` reports it
+  as not found (delete it with `storage.delete`), enqueuing with its
+  deduplication key stores a second active task, a new task cannot depend
+  on it, and a task that also waits for others has its dependency failure
+  policy applied.
+
 ## 1.1.0
 
 * A task that cannot be decrypted no longer stops the queue. Before, the

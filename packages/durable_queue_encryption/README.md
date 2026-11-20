@@ -65,7 +65,7 @@ If the key is lost (for example, the database came back from a backup but the ke
 * `getTask` returns null for them, and lists and counts skip them.
 * When one is next in line, it is set aside: held, as by `queue.hold`, with its encrypted data kept unchanged. `storage.tasksSetAside` reports it.
 
-If the key is gone for good, delete them:
+If the key is gone for good, delete them through the storage. `queue.delete(id)` cannot: the queue cannot read them, so it reports them as not found.
 
 ```dart
 for (final id in await storage.unreadableTaskIds()) {
@@ -81,7 +81,12 @@ for (final id in await storage.recoveredTaskIds()) {
 }
 ```
 
-A task that was waiting for another task, and could not be read when that task finished, stays waiting once it can be read again. Cancel it and enqueue it again.
+Because the queue cannot see them, unreadable tasks also behave like missing ones:
+
+* **Deduplication.** An unreadable task still holds its deduplication key in storage, but lookups skip it, so enqueuing with that key stores a second active task. Once the key is restored, both are active; cancel the one you do not want.
+* **New dependencies.** Enqueuing a task that depends on an unreadable task throws `TaskNotFoundException`.
+* **Existing dependents.** A task waiting only for an unreadable task keeps waiting. If it waits for others too, the queue checks it again when one of them finishes, counts the unreadable one as missing, and applies the waiting task's `onDependencyFailure` policy: by default it is cancelled. Retry it once the key is restored.
+* **Waiting tasks.** A task that was waiting for another task, and could not be read when that task finished, stays waiting once it can be read again. Cancel it and enqueue it again.
 
 ## Adding encryption to an existing app
 

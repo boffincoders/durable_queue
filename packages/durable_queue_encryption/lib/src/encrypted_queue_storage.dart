@@ -46,9 +46,15 @@ import 'payload_cipher.dart';
 ///   encrypted data is kept unchanged.
 ///
 /// [unreadableTaskIds] lists the tasks that cannot be read now. Delete them
-/// if their key is gone for good. If you restore the key, the tasks become
-/// readable again, and [recoveredTaskIds] lists the ones that were set aside
-/// so you can release them with `DurableQueue.release`.
+/// with [delete] if their key is gone for good; `DurableQueue.delete` reports
+/// them as not found. If you restore the key, the tasks become readable
+/// again, and [recoveredTaskIds] lists the ones that were set aside so you
+/// can release them with `DurableQueue.release`.
+///
+/// To the queue, an unreadable task is missing: enqueuing with its
+/// deduplication key stores a second active task, a new task cannot depend
+/// on it, and a task that also waits for others has its dependency failure
+/// policy applied when one of them finishes.
 ///
 /// Every queue or connection that opens the same storage must use this
 /// wrapper with the same keys.
