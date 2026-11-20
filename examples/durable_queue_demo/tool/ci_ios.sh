@@ -2,6 +2,7 @@
 # Builds the demo for the iOS simulator, installs it on a booted iPhone
 # simulator, and runs the kill test. Run from examples/durable_queue_demo.
 set -euxo pipefail
+source tool/retry_on_network_error.sh
 bash tool/prepare_platforms.sh
 
 udid=$(xcrun simctl list devices available -j | python3 -c '
@@ -19,7 +20,7 @@ sys.exit("No iPhone simulator found")
 xcrun simctl boot "$udid" || true
 xcrun simctl bootstatus "$udid" -b
 
-flutter build ios --simulator --debug \
+retry_on_network_error flutter build ios --simulator --debug \
   --dart-define=DEMO_SERVER=http://localhost:8080 \
   --dart-define=DEMO_AUTOPILOT=true
 app=build/ios/iphonesimulator/Runner.app
