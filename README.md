@@ -98,7 +98,7 @@ Every package is optional. Start with the core and its built-in pieces, then swa
 
 ```yaml
 dependencies:
-  durable_queue: ^1.0.0
+  durable_queue: ^1.1.1
 ```
 
 New to it? Start with the [quick start](docs/quickstart.md): a working offline outbox in five minutes. Then the [guide](packages/durable_queue/README.md) goes in three parts: [the basics](packages/durable_queue/README.md#part-1-the-basics) every app needs, [offline-first apps](packages/durable_queue/README.md#part-2-offline-first-apps), and [advanced](packages/durable_queue/README.md#part-3-advanced) features for complex production apps. Everything is also on the [documentation site](https://boffincoders.github.io/durable_queue/). Adapter authors should read the [storage contract](packages/durable_queue/STORAGE.md).

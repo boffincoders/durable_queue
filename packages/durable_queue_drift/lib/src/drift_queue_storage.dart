@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/drift.dart';
@@ -29,6 +30,12 @@ import 'sql.dart';
 ///
 /// Works wherever the drift database runs, including the web. Only one
 /// `DurableQueue` should use a given database and table prefix at a time.
+///
+/// A row whose record cannot be read does not stop the queue. [get] returns
+/// null for it, the lists skip it, and when it is next in line
+/// [getNextReady] sets it aside: its row stays as it is but is no longer
+/// selected, and [tasksSetAside] reports its id. [unreadableTaskIds] lists
+/// such rows; remove them with [delete].
 final class DriftQueueStorage
     implements QueueStorage, QueueStorageCallGuard, QueueStateStorage {
   DriftQueueStorage._(this._db, String tablePrefix)
@@ -80,7 +87,28 @@ final class DriftQueueStorage
   /// closes it.
   ///
   /// Afterwards every method throws [StateError].
-  Future<void> close() async => _closed = true;
+  Future<void> close() async {
+    _closed = true;
+    await _setAside.close();
+  }
+
+  final _setAside = StreamController<String>.broadcast();
+
+  /// Reports the id of each row that [getNextReady] set aside because its
+  /// record could not be read.
+  Stream<String> get tasksSetAside => _setAside.stream;
+
+  /// Ids of rows whose record cannot be read, in enqueue order. The queue
+  /// leaves them out; delete them with [delete].
+  Future<List<String>> unreadableTaskIds() async {
+    _ensureOpen();
+    final rows = await _db.customSelect(_sql.selectAllRecords).get();
+    return [
+      for (final row in rows)
+        if (_tryDecode(row.read<String?>('record')) == null)
+          row.read<String>('id'),
+    ];
+  }
 
   @override
   Future<void> save(StoredTask task) => _write(() async {
@@ -146,19 +174,57 @@ final class DriftQueueStorage
       throw ArgumentError.value(limit, 'limit', 'Must be positive');
     }
     if (limit == null) return _many(_sql.selectByStatus, [status.name]);
-    return _many(_sql.selectByStatus + QueueSql.limitClause, [
-      status.name,
-      limit,
-    ]);
+    // Rows that cannot be read must not use up the limit.
+    var want = limit;
+    while (true) {
+      final rows = await _rows(_sql.selectByStatus + QueueSql.limitClause, [
+        status.name,
+        want,
+      ]);
+      final tasks = [
+        for (final row in rows) ?_tryDecode(row.read<String?>('record')),
+      ];
+      if (tasks.length >= limit || rows.length < want) {
+        return List<StoredTask>.unmodifiable(tasks.take(limit));
+      }
+      want = limit + rows.length - tasks.length;
+    }
+  }
+
+  /// Returns the next ready task whose record can be read. A ready row that
+  /// cannot be read is set aside first, so it is not returned again, and
+  /// [tasksSetAside] reports it.
+  @override
+  Future<StoredTask?> getNextReady(DateTime now) async {
+    while (true) {
+      final rows = await _rows(_sql.selectNextReady, [
+        now.microsecondsSinceEpoch,
+      ]);
+      if (rows.isEmpty) return null;
+      final task = _tryDecode(rows.first.read<String?>('record'));
+      if (task != null) return task;
+      final id = rows.first.read<String>('id');
+      await _write(() async {
+        await _db.customStatement(_sql.setAside, [
+          StoredTask.heldNextAttemptAt.microsecondsSinceEpoch,
+          id,
+        ]);
+      });
+      if (!_setAside.isClosed) _setAside.add(id);
+    }
   }
 
   @override
-  Future<StoredTask?> getNextReady(DateTime now) =>
-      _one(_sql.selectNextReady, [now.microsecondsSinceEpoch]);
-
-  @override
-  Future<DateTime?> getNextWakeAt() async =>
-      (await _one(_sql.selectNextWake))?.nextAttemptAt;
+  Future<DateTime?> getNextWakeAt() async {
+    final rows = await _rows(_sql.selectNextWake);
+    if (rows.isEmpty) return null;
+    final task = _tryDecode(rows.first.read<String?>('record'));
+    if (task != null) return task.nextAttemptAt;
+    return DateTime.fromMicrosecondsSinceEpoch(
+      rows.first.read<int>('next_attempt_at_us'),
+      isUtc: true,
+    );
+  }
 
   @override
   Future<int> getMaxSequence() async {
@@ -239,34 +305,47 @@ final class DriftQueueStorage
     _ => throw ArgumentError.value(value, 'value', 'Unsupported parameter'),
   };
 
+  Future<List<QueryRow>> _rows(
+    String sql, [
+    List<Object> parameters = const [],
+  ]) {
+    _ensureOpen();
+    return _db
+        .customSelect(
+          sql,
+          variables: [for (final p in parameters) _variable(p)],
+        )
+        .get();
+  }
+
+  /// The first row's task, or null when there is none or its record cannot
+  /// be read.
   Future<StoredTask?> _one(
     String sql, [
     List<Object> parameters = const [],
   ]) async {
-    _ensureOpen();
-    final rows = await _db
-        .customSelect(
-          sql,
-          variables: [for (final p in parameters) _variable(p)],
-        )
-        .get();
-    return rows.isEmpty ? null : _decode(rows.first.read<String>('record'));
+    final rows = await _rows(sql, parameters);
+    return rows.isEmpty ? null : _tryDecode(rows.first.read<String?>('record'));
   }
 
+  /// The rows' tasks, skipping records that cannot be read.
   Future<List<StoredTask>> _many(
     String sql, [
     List<Object> parameters = const [],
   ]) async {
-    _ensureOpen();
-    final rows = await _db
-        .customSelect(
-          sql,
-          variables: [for (final p in parameters) _variable(p)],
-        )
-        .get();
-    return List<StoredTask>.unmodifiable(
-      rows.map((row) => _decode(row.read<String>('record'))),
-    );
+    final rows = await _rows(sql, parameters);
+    return List<StoredTask>.unmodifiable([
+      for (final row in rows) ?_tryDecode(row.read<String?>('record')),
+    ]);
+  }
+
+  static StoredTask? _tryDecode(String? record) {
+    if (record == null) return null;
+    try {
+      return _decode(record);
+    } on Object {
+      return null;
+    }
   }
 
   static StoredTask _decode(String record) {

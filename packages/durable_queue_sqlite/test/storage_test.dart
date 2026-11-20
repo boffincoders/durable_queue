@@ -244,12 +244,15 @@ void main() {
     db.close();
   });
 
-  test('a corrupt record is reported, not silently skipped', () async {
+  test('a corrupt record is left out but reported, not lost', () async {
     final db = sqlite3.openInMemory();
     final storage = SqliteQueueStorage.fromDatabase(db);
     await storage.save(storedTask(id: 'a'));
-    db.execute("UPDATE durable_queue_tasks SET record = '[1]'");
-    await expectLater(storage.get('a'), throwsA(isA<FormatException>()));
+    await storage.save(storedTask(id: 'b'));
+    db.execute("UPDATE durable_queue_tasks SET record = '[1]' WHERE id = 'a'");
+    expect(await storage.get('a'), isNull);
+    expect((await storage.getAll()).map((t) => t.id), ['b']);
+    expect(await storage.unreadableTaskIds(), ['a']);
     db.close();
   });
 

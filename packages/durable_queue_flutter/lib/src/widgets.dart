@@ -98,7 +98,14 @@ class _DurableQueueScopeState extends State<DurableQueueScope> {
     if (!identical(oldWidget.queue, widget.queue) ||
         oldWidget.pauseInBackground != widget.pauseInBackground ||
         oldWidget.runQueue != widget.runQueue) {
-      _detach(oldWidget.queue, close: oldWidget.closeOnDispose);
+      // Close the old queue only when the scope no longer uses it; a new
+      // pauseInBackground or runQueue keeps the same queue.
+      _detach(
+        oldWidget.queue,
+        close:
+            oldWidget.closeOnDispose &&
+            !identical(oldWidget.queue, widget.queue),
+      );
       _attach();
     }
   }
@@ -225,6 +232,8 @@ class _QueueTaskBuilderState extends State<QueueTaskBuilder> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<StoredTask?>(
+      // A new task id starts empty instead of showing the old task.
+      key: ObjectKey(_stream),
       stream: _stream,
       builder: (context, snapshot) => widget.builder(context, snapshot.data),
     );
@@ -296,6 +305,7 @@ class _QueueProgressBuilderState extends State<QueueProgressBuilder> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<TaskProgress?>(
+      key: ObjectKey(_stream),
       stream: _stream,
       initialData: _queue?.progressOf(widget.taskId),
       builder: (context, snapshot) => widget.builder(context, snapshot.data),
@@ -365,6 +375,7 @@ class _QueueGroupBuilderState extends State<QueueGroupBuilder> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<StoredTask>>(
+      key: ObjectKey(_stream),
       stream: _stream,
       builder: (context, snapshot) =>
           widget.builder(context, snapshot.data ?? const []),

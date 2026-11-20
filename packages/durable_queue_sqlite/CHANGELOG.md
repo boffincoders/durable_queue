@@ -1,3 +1,16 @@
+## 1.2.0
+
+* A row whose record cannot be read no longer stops the queue. Before, the
+  queue retried reading it forever, so one damaged row stopped every task
+  behind it. Now `get` returns null for it, the lists skip it (a limited
+  `getByStatus` still returns up to its limit of readable tasks), and
+  `getNextReady` sets it aside, leaving the row as it is.
+  `unreadableTaskIds()` lists such rows and `tasksSetAside` reports each
+  one set aside.
+* `SqliteQueueLease` opens a connection only for each check or change, so a
+  Workmanager job that never closes it leaves nothing open. `close()` is
+  now optional.
+
 ## 1.1.0
 
 * Keeps queue state next to the tasks (`QueueStateStorage`), so rate

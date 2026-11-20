@@ -1,3 +1,10 @@
+## 1.2.0
+
+* A row whose record cannot be read no longer stops the queue: `get`
+  returns null for it, the lists skip it, and `getNextReady` sets it
+  aside. `unreadableTaskIds()` lists such rows and `tasksSetAside` reports
+  each one set aside.
+
 ## 1.1.0
 
 * Keeps queue state next to the tasks (`QueueStateStorage`), so rate

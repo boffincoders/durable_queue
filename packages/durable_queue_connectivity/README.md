@@ -8,8 +8,8 @@ Built on [`connectivity_plus`](https://pub.dev/packages/connectivity_plus), with
 
 ```yaml
 dependencies:
-  durable_queue: ^1.0.0
-  durable_queue_connectivity: ^1.0.0
+  durable_queue: ^1.1.1
+  durable_queue_connectivity: ^1.0.2
 ```
 
 Requires Flutter, because `connectivity_plus` is a Flutter plugin. Follow its platform notes (for example the Android `ACCESS_NETWORK_STATE` permission, which it adds for you).

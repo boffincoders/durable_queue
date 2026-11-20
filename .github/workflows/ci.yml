@@ -187,6 +187,8 @@ jobs:
       - run: dart pub get
       - run: dart format --output=none --set-exit-if-changed website
       - run: dart analyze --fatal-infos website
+      # README install snippets must ask for each package's current version.
+      - run: dart run website/check_versions.dart
       - run: dart run website/build.dart
 
   benchmark:

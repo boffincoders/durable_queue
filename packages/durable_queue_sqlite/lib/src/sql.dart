@@ -134,6 +134,16 @@ final class QueueSql {
   /// One task by id.
   String get selectById => 'SELECT record FROM $tasks WHERE id = ?';
 
+  /// Moves a task whose record cannot be read out of the ready and wake
+  /// indexes, without reading the record: parameters are the time (held
+  /// time) and the id.
+  String get setAside =>
+      'UPDATE $tasks SET next_attempt_at_us = ? WHERE id = ?';
+
+  /// Every id and record, for finding records that cannot be read.
+  String get selectAllRecords =>
+      'SELECT id, record FROM $tasks ORDER BY $_order';
+
   /// Every task in enqueue order.
   String get selectAll => 'SELECT record FROM $tasks ORDER BY $_order';
 
@@ -149,14 +159,15 @@ final class QueueSql {
 
   /// Next claimable task: highest priority, then enqueue order.
   String get selectNextReady =>
-      'SELECT record FROM $tasks INDEXED BY ${_p}tasks_ready '
+      'SELECT id, record FROM $tasks INDEXED BY ${_p}tasks_ready '
       'WHERE status IN $_schedulable '
       'AND (next_attempt_at_us IS NULL OR next_attempt_at_us <= ?) '
       'ORDER BY priority DESC, $_order LIMIT 1';
 
   /// Task with the earliest scheduled time.
   String get selectNextWake =>
-      'SELECT record FROM $tasks INDEXED BY ${_p}tasks_wake '
+      'SELECT next_attempt_at_us, record FROM $tasks '
+      'INDEXED BY ${_p}tasks_wake '
       'WHERE status IN $_schedulable AND next_attempt_at_us IS NOT NULL '
       'ORDER BY next_attempt_at_us LIMIT 1';
 

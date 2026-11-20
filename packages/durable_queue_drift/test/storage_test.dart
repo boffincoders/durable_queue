@@ -39,6 +39,39 @@ void main() {
 
   TestDatabase openFile() => TestDatabase(NativeDatabase(File(path)));
 
+  test('a damaged row is set aside and the tasks behind it run', () async {
+    final db = openFile();
+    final storage = await DriftQueueStorage.open(db);
+    final seen = <String>[];
+    final queue = DurableQueue(storage: storage)
+      ..register<Note>(
+        type: 'note',
+        decoder: Note.fromJson,
+        handler: (task, context) async => seen.add(task.text),
+      );
+    final setAside = <String>[];
+    storage.tasksSetAside.listen(setAside.add);
+
+    final bad = await queue.enqueue(Note('first'));
+    await queue.enqueue(Note('second'));
+    await db.customStatement(
+      "UPDATE durable_queue_tasks SET record = '{not json' WHERE id = ?",
+      [bad],
+    );
+
+    final result = await queue.drain().timeout(const Duration(seconds: 5));
+    expect(result.completed, 1);
+    expect(seen, ['second']);
+    expect(setAside, [bad]);
+    expect(await queue.getTask(bad), isNull);
+    expect(await storage.unreadableTaskIds(), [bad]);
+    expect(await storage.getNextReady(DateTime.utc(3000)), isNull);
+
+    await queue.close();
+    await storage.close();
+    await db.close();
+  });
+
   test('a queued task survives closing and reopening the app', () async {
     var db = openFile();
     var queue = DurableQueue(storage: await DriftQueueStorage.open(db))

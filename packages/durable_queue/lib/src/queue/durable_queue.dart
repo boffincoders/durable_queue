@@ -1079,6 +1079,8 @@ final class DurableQueue {
         case QueueRunState.paused:
           _runState = QueueRunState.stopping;
           _cancelWake();
+          // Lets a drain in progress see the stop and end.
+          _signalActivity();
           return true;
       }
     });
@@ -1721,6 +1723,9 @@ final class DurableQueue {
   /// * When [timeLimit] passes, no new task starts. Handlers already running
   ///   are allowed to finish, so the call can return after the limit; leave
   ///   headroom for your longest task.
+  /// * Calling [stop] during the drain ends it the same way: no new task
+  ///   starts, and the drain returns once running handlers finish, with
+  ///   [DrainStopReason.idle].
   ///
   /// Throws [StateError] unless the queue is idle, and [ArgumentError] if
   /// [timeLimit] is not positive. Errors from [start] are passed on.
@@ -1785,6 +1790,12 @@ final class DurableQueue {
 
   Future<bool> _isDrained(DateTime? deadline, bool waitForScheduled) {
     return _lock.synchronized(() async {
+      // Stopped from outside, for example by a background job that lost
+      // its lease: end the drain. Its own stop waits for running handlers.
+      if (_runState == QueueRunState.stopping ||
+          _runState == QueueRunState.idle) {
+        return true;
+      }
       if (_inFlight > 0 || _pumping) return false;
       if (_runState != QueueRunState.running) return false;
       final now = _clock.now();

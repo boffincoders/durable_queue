@@ -212,6 +212,38 @@ void main() {
     expect(slot.holder, same(other));
   });
 
+  test('a lost lease stops the drain before the next task', () async {
+    final release = Completer<void>();
+    final storage = MemoryQueueStorage();
+    final setup = newQueue(clock: clock, storage: storage);
+    await setup.enqueue(Note('long'));
+    await setup.enqueue(Note('next'));
+    await setup.close();
+    final done = drainWithLease(
+      lease: lease,
+      openQueue: () => newQueue(
+        clock: clock,
+        storage: storage,
+        ran: ran,
+        handler: (note) =>
+            note.text == 'long' ? release.future : Future.value(),
+      ),
+      clock: clock,
+    );
+    await until(() => ran.isNotEmpty);
+    slot.holder = FakeLease(slot);
+    clock.advance(const Duration(seconds: 30));
+    await until(() => lease.renewCalls == 1);
+    release.complete();
+
+    final result = await done.timeout(const Duration(seconds: 5));
+    expect(result.leaseLost, isTrue);
+    expect(ran, ['long'], reason: 'another runner owns the storage now');
+    final left = newQueue(clock: clock, storage: storage);
+    expect(await left.getTasks(status: TaskStatus.pending), hasLength(1));
+    await left.close();
+  });
+
   test('errors are passed on and the lease is released', () async {
     await expectLater(
       drainWithLease(

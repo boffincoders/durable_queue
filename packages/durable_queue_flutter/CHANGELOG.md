@@ -1,3 +1,11 @@
+## 1.0.2
+
+* Fix: with `closeOnDispose: true`, changing `pauseInBackground` or
+  `runQueue` on a `DurableQueueScope` closed the queue it still used.
+* Fix: `QueueTaskBuilder`, `QueueProgressBuilder`, and `QueueGroupBuilder`
+  showed the previous task's or group's data for a moment after their
+  `taskId` or `group` changed.
+
 ## 1.0.1
 
 * Requires `durable_queue` 1.1.0 or later. No other changes.

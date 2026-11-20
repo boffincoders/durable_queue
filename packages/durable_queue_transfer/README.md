@@ -20,9 +20,9 @@ The operating system runs the transfer, through [`background_downloader`](https:
 ```yaml
 dependencies:
   background_downloader: ^9.6.4
-  durable_queue: ^1.0.0
-  durable_queue_sqlite: ^1.0.0
-  durable_queue_transfer: ^1.0.0
+  durable_queue: ^1.1.1
+  durable_queue_sqlite: ^1.2.0
+  durable_queue_transfer: ^1.0.1
 ```
 
 Requires Flutter 3.47 or later (as `background_downloader` does). Follow `background_downloader`'s [setup](https://pub.dev/packages/background_downloader#initial-setup): on Android, Kotlin 2.1.0 or later; iOS 14 or later, HTTPS by default. Use storage that survives restarts, such as `durable_queue_sqlite`.

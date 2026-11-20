@@ -1,3 +1,10 @@
+## 1.0.2
+
+* Fix: a network change reported while `NetworkGate.start` was still
+  reading the current state was overwritten by that older reading. With
+  `ConnectivityGate`, which does not repeat a state, the gate could stay
+  closed while the device was online.
+
 ## 1.0.1
 
 * Requires `durable_queue` 1.1.0 or later. No other changes.

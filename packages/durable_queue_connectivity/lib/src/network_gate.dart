@@ -119,7 +119,10 @@ final class NetworkGate extends QueueGate {
       // Unknown: let the stream decide.
       return;
     }
-    _onNetwork(up);
+    // A change reported while the check ran is newer than the check: keep
+    // it, or the gate could stay closed while online (sources such as
+    // ConnectivityGate do not repeat a state).
+    if (!_known) _onNetwork(up);
     await _probing;
   }
 
