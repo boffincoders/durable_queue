@@ -1,3 +1,10 @@
+## 1.0.2
+
+Documentation only.
+
+* The README says that rate limits start empty after a restart with Hive
+  storage, and which storages keep them.
+
 ## 1.0.1
 
 * Requires `durable_queue` 1.1.0 or later. Hive storage does not keep queue

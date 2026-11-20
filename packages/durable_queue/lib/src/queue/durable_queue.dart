@@ -484,9 +484,9 @@ final class DurableQueue {
   ///
   /// Pass [onDuplicate] [DuplicatePolicy.replace] to run the new payload
   /// instead, so the latest version wins: a task that has not started gets
-  /// the new payload and keeps its other settings, and a running one is
-  /// followed by a task with the new payload. This returns the id of the
-  /// task that will run it. See [DuplicatePolicy.replace].
+  /// the new payload and [idempotencyKey], and keeps its other settings, and
+  /// a running one is followed by a task with the new payload. This returns
+  /// the id of the task that will run it. See [DuplicatePolicy.replace].
   ///
   /// [idempotencyKey] is stored and passed to the handler on [TaskContext].
   ///
@@ -889,6 +889,9 @@ final class DurableQueue {
         target.copyWith(
           payload: request.payload,
           payloadVersion: request.payloadVersion,
+          // An earlier attempt may have reached the server under the old
+          // key; a server that honours it would never apply this payload.
+          idempotencyKey: request.idempotencyKey,
           updatedAt: now,
         ),
       );
@@ -898,7 +901,7 @@ final class DurableQueue {
           taskType: target.type,
           occurredAt: now,
           deduplicationKey: target.deduplicationKey,
-          idempotencyKey: target.idempotencyKey,
+          idempotencyKey: request.idempotencyKey,
           replaced: true,
         ),
       );

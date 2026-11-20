@@ -1,3 +1,13 @@
+## 1.1.1
+
+* Fix: `onDuplicate: DuplicatePolicy.replace` now gives the replaced task
+  the idempotency key of the new `enqueue` call (or none). Before, it kept
+  the old key: a task waiting to retry, whose first attempt had reached the
+  server, sent the new payload under the old key, and a server that honours
+  idempotency keys answered with the first result and never applied the
+  newer version. Give each version its own key, for example the record id
+  and a revision number; the README shows how.
+
 ## 1.1.0
 
 * `enqueue(onDuplicate: DuplicatePolicy.replace)`: the latest version wins.
