@@ -148,8 +148,8 @@ const packages = [
   ),
   Package(
     'durable_queue_transfer',
-    'Uploads and downloads the operating system finishes after the app is '
-        'minimised or closed.',
+    'Uploads, downloads, and HTTP requests the operating system finishes '
+        'after the app is minimised or closed.',
     flutter: true,
     metaTitle:
         'durable_queue_transfer: Flutter background upload and download that '
@@ -310,7 +310,9 @@ const faq = [
         'register the task type with <code>requires: {\'network\'}</code> and '
         '<code>deferOn: deferOnConnectionError(\'network\')</code>. Tasks wait while the '
         'device is offline without using attempts, and start as soon as a connection comes '
-        'back.',
+        'back. To have a request sent even after the app is closed, enqueue a '
+        '<code>BackgroundRequest</code> registered with <code>durable_queue_transfer</code>\'s '
+        '<code>registerRequests</code>: the operating system sends it.',
   ),
   (
     q: 'How do I send only the latest edit of a record?',

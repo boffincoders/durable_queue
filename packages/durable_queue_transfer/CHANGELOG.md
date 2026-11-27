@@ -1,3 +1,16 @@
+## 1.1.0
+
+* `registerRequests` and `BackgroundRequest`: plain HTTP requests (JSON or
+  text bodies) that the operating system sends, so they go out even after
+  the app is closed. Each attempt is a background_downloader `DataTask`,
+  handed off like an upload, with the queue's retries, dependencies,
+  deduplication, gates, and rate limits. The idempotency key is sent as a
+  header; `headersAtSend` adds headers such as `Authorization` per attempt
+  without storing them; `onResponse` receives the reply; and
+  `successStatusCodes` completes the task on statuses such as 409.
+* Fix: `start` asked a `DataTask` for progress updates, which a `DataTask`
+  does not support, so starting one failed. It now asks for status only.
+
 ## 1.0.1
 
 * Requires `durable_queue` 1.1.0 or later. No other changes.
