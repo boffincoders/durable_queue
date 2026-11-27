@@ -24,6 +24,8 @@ retry_on_network_error flutter build ios --simulator --debug \
   --dart-define=DEMO_SERVER=http://localhost:8080 \
   --dart-define=DEMO_AUTOPILOT=true
 app=build/ios/iphonesimulator/Runner.app
-xcrun simctl install booted "$app"
 bundle=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")
+# Start from an empty queue: an earlier run's tasks would change the counts.
+xcrun simctl uninstall booted "$bundle" || true
+xcrun simctl install booted "$app"
 dart tool/kill_test.dart --platform ios --app-id "$bundle"

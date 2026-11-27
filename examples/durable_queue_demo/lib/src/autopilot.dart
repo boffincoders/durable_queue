@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:durable_queue/durable_queue.dart' show TaskStatus;
+
 import 'demo.dart';
 import 'demo_config.dart';
 
@@ -22,6 +24,7 @@ final class Autopilot {
           count: (scenario!['count'] as int?) ?? 6,
           sizeKb: (scenario['sizeKb'] as int?) ?? 256,
         );
+        await demo.addNotes(count: (scenario['notes'] as int?) ?? 0);
       }
     } on Object catch (error) {
       stderr.writeln('autopilot: enqueue failed ($error)');
@@ -52,10 +55,16 @@ final class Autopilot {
       for (final task in tasks) {
         byStatus.update(task.status.name, (n) => n + 1, ifAbsent: () => 1);
       }
+      final notes = await demo.queue.getTasks(group: notesGroup);
       await _post('/report', {
         'total': tasks.length,
         'byStatus': byStatus,
         'handedOff': tasks.where((task) => task.isHandedOff).length,
+        'notesTotal': notes.length,
+        'notesHandedOff': notes.where((task) => task.isHandedOff).length,
+        'notesCompleted': notes
+            .where((task) => task.status == TaskStatus.completed)
+            .length,
         'at': DateTime.now().toIso8601String(),
       });
     } on Object {

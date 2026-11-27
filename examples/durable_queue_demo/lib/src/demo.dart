@@ -71,6 +71,9 @@ final class Demo {
         );
       },
     );
+    // Notes: plain HTTP requests the operating system sends, so they go
+    // out even after the app is closed.
+    transfers.registerRequests();
     await transfers.attach();
     return Demo._(queue, transfers, network, photos);
   }
@@ -98,6 +101,29 @@ final class Demo {
           HttpRequestTask(method: 'POST', url: '/photos/$name/done'),
         ],
         group: photosGroup,
+        retryPolicy: RetryPolicy.exponential(
+          maxAttempts: 8,
+          initialDelay: const Duration(seconds: 5),
+          maxDelay: const Duration(minutes: 5),
+          jitter: true,
+        ),
+      );
+    }
+  }
+
+  /// Queues [count] notes, each a request the operating system sends.
+  Future<void> addNotes({int count = 3}) async {
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    for (var i = 0; i < count; i++) {
+      final name = 'note_${stamp}_$i';
+      await queue.enqueue(
+        BackgroundRequest(
+          method: 'POST',
+          url: '$demoServer/notes/$name',
+          body: {'text': 'Note $i'},
+        ),
+        group: notesGroup,
+        idempotencyKey: name,
         retryPolicy: RetryPolicy.exponential(
           maxAttempts: 8,
           initialDelay: const Duration(seconds: 5),
