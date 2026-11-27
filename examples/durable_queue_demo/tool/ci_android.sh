@@ -7,5 +7,7 @@ bash tool/prepare_platforms.sh
 retry_on_network_error flutter build apk --debug \
   --dart-define=DEMO_SERVER=http://10.0.2.2:8080 \
   --dart-define=DEMO_AUTOPILOT=true
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
+# Start from an empty queue: an earlier run's tasks would change the counts.
+adb uninstall dev.boffincoders.durable_queue_demo || true
+adb install build/app/outputs/flutter-apk/app-debug.apk
 dart tool/kill_test.dart --platform android --app-id dev.boffincoders.durable_queue_demo

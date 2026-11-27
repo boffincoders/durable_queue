@@ -54,6 +54,28 @@ final class DemoServer {
   /// Uploads currently being received or held.
   var uploadsInFlight = 0;
 
+  /// Notes received and answered, per note name.
+  final notes = <String, int>{};
+
+  /// Note requests per note name, including ones cut off before the answer.
+  final noteAttempts = <String, int>{};
+
+  /// Idempotency keys seen per note name.
+  final noteKeys = <String, Set<String>>{};
+
+  /// Notes answered while no app process was running (iOS background
+  /// sessions can do this); informational.
+  var notesAnsweredWhileAppDown = 0;
+
+  /// Notes currently being held.
+  var notesInFlight = 0;
+
+  /// How long each note is held before it is answered.
+  var noteDelay = Duration.zero;
+
+  /// Set by the kill test while the app is not running.
+  var appDown = false;
+
   /// How long each upload is held before it is answered.
   var uploadDelay = Duration.zero;
 
@@ -78,6 +100,12 @@ final class DemoServer {
     },
     'done': done,
     'uploadsInFlight': uploadsInFlight,
+    'notes': notes,
+    'noteAttempts': noteAttempts,
+    'noteKeys': {
+      for (final entry in noteKeys.entries) entry.key: entry.value.toList(),
+    },
+    'notesAnsweredWhileAppDown': notesAnsweredWhileAppDown,
   };
 
   /// Forgets all counts and settings.
@@ -87,6 +115,13 @@ final class DemoServer {
     uploadKeys.clear();
     done.clear();
     uploadsInFlight = 0;
+    notes.clear();
+    noteAttempts.clear();
+    noteKeys.clear();
+    notesAnsweredWhileAppDown = 0;
+    notesInFlight = 0;
+    noteDelay = Duration.zero;
+    appDown = false;
     uploadDelay = Duration.zero;
     failEvery = 0;
     scenario = {'action': 'none'};
@@ -136,6 +171,9 @@ final class DemoServer {
         return _json(request, {'ok': true});
     }
     final segments = request.uri.pathSegments;
+    if (method == 'POST' && segments.length == 2 && segments[0] == 'notes') {
+      return _note(request, segments[1]);
+    }
     if (method == 'POST' &&
         segments.length == 3 &&
         segments[0] == 'photos' &&
@@ -183,6 +221,24 @@ final class DemoServer {
       await request.response.close();
     } finally {
       uploadsInFlight--;
+    }
+  }
+
+  /// A note sent by the app's `BackgroundRequest`, held for [noteDelay].
+  Future<void> _note(HttpRequest request, String name) async {
+    noteAttempts.update(name, (n) => n + 1, ifAbsent: () => 1);
+    final key = request.headers.value('idempotency-key');
+    if (key != null) noteKeys.putIfAbsent(name, () => {}).add(key);
+    final body = await _readJson(request);
+    notesInFlight++;
+    try {
+      if (noteDelay > Duration.zero) await Future<void>.delayed(noteDelay);
+      request.response.statusCode = HttpStatus.created;
+      await _json(request, {'saved': name, 'text': body['text']});
+      notes.update(name, (n) => n + 1, ifAbsent: () => 1);
+      if (appDown) notesAnsweredWhileAppDown++;
+    } finally {
+      notesInFlight--;
     }
   }
 

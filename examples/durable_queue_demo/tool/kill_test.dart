@@ -17,7 +17,9 @@
 //     while offline. Then turn the network back on.
 //  5. Relaunch and wait until every task completed.
 //  6. Check: every photo uploaded at least once and announced exactly once,
-//     and the app reports all tasks completed.
+//     every note (a BackgroundRequest the operating system sends) received
+//     with one idempotency key across its attempts, and the app reports all
+//     tasks completed.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -39,6 +41,7 @@ Future<void> main(List<String> args) async {
   platform = option('platform');
   appId = option('app-id');
   final count = int.parse(option('photos', '6'));
+  final notes = int.parse(option('notes', '3'));
   final port = int.parse(option('port', '8080'));
   if (platform != 'android' && platform != 'ios') {
     stderr.writeln('--platform must be android or ios');
@@ -49,7 +52,7 @@ Future<void> main(List<String> args) async {
   log('server on port ${server.port}');
   var failed = false;
   try {
-    await run(server, count);
+    await run(server, count, notes);
   } on Object catch (error, stackTrace) {
     failed = true;
     log('FAILED: $error\n$stackTrace');
@@ -61,20 +64,30 @@ Future<void> main(List<String> args) async {
   exit(failed ? 1 : 0);
 }
 
-Future<void> run(DemoServer server, int count) async {
+Future<void> run(DemoServer server, int count, int notes) async {
   await stopApp();
 
   // 1–2. Enqueue with slow uploads.
   // Long enough that the kill below lands while uploads are in flight; the
   // kill checks that it did.
   server.uploadDelay = const Duration(seconds: 60);
-  server.scenario = {'action': 'enqueue', 'count': count, 'sizeKb': 256};
+  server.noteDelay = const Duration(seconds: 60);
+  server.scenario = {
+    'action': 'enqueue',
+    'count': count,
+    'sizeKb': 256,
+    'notes': notes,
+  };
   await launchApp();
   await waitFor(
     'uploads running and handed off',
     const Duration(minutes: 3),
     () =>
         server.uploadsInFlight > 0 &&
+        // Notes handed to the operating system. On iOS they may still wait
+        // there for a connection, behind the uploads to the same host.
+        (notes == 0 ||
+            ((server.report?['notesHandedOff'] as int?) ?? 0) >= 1) &&
         ((server.report?['handedOff'] as int?) ?? 0) >= 2,
   );
   log('in flight: ${server.uploadsInFlight}, report: ${server.report}');
@@ -82,16 +95,19 @@ Future<void> run(DemoServer server, int count) async {
   // 3. Kill it in the middle.
   server.scenario = {'action': 'observe'};
   await killApp(server);
+  server.appDown = true;
   log(
     'killed; uploads continue without the app: ${jsonEncode(server.stats())}',
   );
   server.uploadDelay = Duration.zero;
+  server.noteDelay = Duration.zero;
   await Future<void>.delayed(const Duration(seconds: 5));
 
   // 4. Offline launch (Android only).
   if (platform == 'android') {
     await setNetwork(false);
     final doneBefore = sum(server.done);
+    server.appDown = false;
     await launchApp();
     await Future<void>.delayed(const Duration(seconds: 15));
     final doneOffline = sum(server.done);
@@ -102,6 +118,7 @@ Future<void> run(DemoServer server, int count) async {
     await setNetwork(true);
     log('network back on');
   } else {
+    server.appDown = false;
     await launchApp();
   }
 
@@ -110,7 +127,10 @@ Future<void> run(DemoServer server, int count) async {
     final report = server.report;
     if (report == null) return false;
     final byStatus = (report['byStatus'] as Map?) ?? {};
-    return report['total'] == count * 2 && byStatus['completed'] == count * 2;
+    return report['total'] == count * 2 &&
+        byStatus['completed'] == count * 2 &&
+        report['notesTotal'] == notes &&
+        report['notesCompleted'] == notes;
   });
 
   // 6. Check the server's view.
@@ -129,9 +149,20 @@ Future<void> run(DemoServer server, int count) async {
     }
   }
   final resent = server.uploadAttempts.entries.where((e) => e.value > 1).length;
+  if (server.notes.length != notes) {
+    throw StateError('Expected $notes notes received, got ${server.notes}');
+  }
+  final keys = server.noteKeys.entries.where((e) => e.value.length != 1);
+  if (keys.isNotEmpty) {
+    throw StateError('A note changed its idempotency key: ${keys.toList()}');
+  }
+  final notesResent = server.noteAttempts.values.where((n) => n > 1).length;
   log(
     'PASSED: $count photos uploaded and announced once each '
-    '($resent sent again after the kill, allowed: at least once)',
+    '($resent sent again after the kill, allowed: at least once); '
+    '$notes notes received with one idempotency key each '
+    '($notesResent sent again, ${server.notesAnsweredWhileAppDown} answered '
+    'while the app was not running)',
   );
 }
 

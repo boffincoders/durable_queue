@@ -14,3 +14,6 @@ const demoAutopilot = bool.fromEnvironment('DEMO_AUTOPILOT');
 
 /// The group of every photo upload and its follow-up request.
 const photosGroup = 'photos';
+
+/// The group of the notes the operating system sends (`BackgroundRequest`).
+const notesGroup = 'notes';
