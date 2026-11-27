@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:background_downloader/background_downloader.dart'
     show
+        DataTask,
         DownloadTask,
         FileDownloader,
         Task,
@@ -13,7 +14,10 @@ import 'package:background_downloader/background_downloader.dart'
         Updates;
 import 'package:durable_queue/durable_queue.dart'
     show
+        DeferOnError,
         DurableQueue,
+        RateLimit,
+        RetryPredicate,
         QueueClock,
         QueueDelay,
         QueueEvent,
@@ -25,8 +29,21 @@ import 'package:durable_queue/durable_queue.dart'
         TaskHoldChanged;
 import 'package:durable_queue/durable_queue.dart' as dq show TaskStatus;
 
+import 'background_request.dart';
 import 'transfer_errors.dart';
 import 'transfer_ids.dart';
+
+/// Called with the server's answer to a [BackgroundRequest].
+typedef BackgroundResponseCallback = FutureOr<void> Function(
+  BackgroundRequest request,
+  TransferResult result,
+);
+
+/// Headers added to a [BackgroundRequest] when it is sent, not stored with
+/// it, for example an `Authorization` header with a fresh token.
+typedef BackgroundHeaders = FutureOr<Map<String, String>> Function(
+  BackgroundRequest request,
+);
 
 /// The outcome of a successful transfer, passed to
 /// [QueueTransfers.onComplete].
@@ -171,6 +188,67 @@ final class QueueTransfers {
 
   FileDownloader get _files => _downloader ?? FileDownloader();
 
+  /// Statuses that complete a [BackgroundRequest] although the server
+  /// answered with an error, set by [registerRequests].
+  Set<int> _requestSuccessCodes = const {};
+  BackgroundResponseCallback? _onResponse;
+
+  /// Sends every [BackgroundRequest] through the operating system, so a
+  /// request goes out even after the app is minimised or closed.
+  ///
+  /// Each attempt is a background_downloader `DataTask`, handed off like a
+  /// file transfer: the queue task stays running until the request ends,
+  /// then completes, or fails so [retryIf] and the task's `RetryPolicy`
+  /// decide what follows. Tasks that depend on it run after it completes.
+  ///
+  /// * The task's idempotency key, when it has one, is sent in
+  ///   [idempotencyHeader], the same on every attempt.
+  /// * [headersAtSend] adds headers when each attempt starts, for example
+  ///   an `Authorization` header, so they are not stored in the queue.
+  ///   background_downloader still keeps them with the transfer until it
+  ///   ends.
+  /// * [onResponse] runs when a request succeeds, before its task
+  ///   completes. If it throws, the attempt fails. The response body and
+  ///   headers are null for a request that finished while the app was not
+  ///   running; the status code is kept.
+  /// * [successStatusCodes] lists error statuses that still complete the
+  ///   task, for example `{409}` for an API that answers a repeated
+  ///   idempotency key with 409 Conflict.
+  /// * [requires], [deferOn], and [rateLimit] are passed to
+  ///   `DurableQueue.register`, as for any task type.
+  ///
+  /// Bodies are text or JSON; files go through [start] with an
+  /// `UploadTask`. Call it once, after creating this object and before the
+  /// queue starts.
+  void registerRequests({
+    String idempotencyHeader = 'Idempotency-Key',
+    BackgroundHeaders? headersAtSend,
+    BackgroundResponseCallback? onResponse,
+    Set<int> successStatusCodes = const {},
+    RetryPredicate retryIf = isRetryableTransferError,
+    Set<String> requires = const {},
+    DeferOnError? deferOn,
+    RateLimit? rateLimit,
+  }) {
+    _onResponse = onResponse;
+    _requestSuccessCodes = Set.unmodifiable(successStatusCodes);
+    queue.register<BackgroundRequest>(
+      type: BackgroundRequest.taskType,
+      decoder: BackgroundRequest.fromJson,
+      retryIf: retryIf,
+      requires: requires,
+      deferOn: deferOn,
+      rateLimit: rateLimit,
+      handler: (request, context) async {
+        final extra = {
+          idempotencyHeader: ?context.idempotencyKey,
+          ...?await headersAtSend?.call(request),
+        };
+        await start(context, request.toDataTask(extraHeaders: extra));
+      },
+    );
+  }
+
   /// Starts [transfer] and hands the queue task of [context] off to it.
   /// Call it from a handler and return.
   ///
@@ -185,7 +263,11 @@ final class QueueTransfers {
     final task = transfer.copyWith(
       taskId: id,
       group: group,
-      updates: reportProgress && transfer.updates == Updates.status
+      // A DataTask reports status only; asking it for progress fails.
+      updates:
+          reportProgress &&
+              transfer.updates == Updates.status &&
+              transfer is! DataTask
           ? Updates.statusAndProgress
           : null,
     );
@@ -323,10 +405,18 @@ final class QueueTransfers {
     final reference = transfer.taskId;
     final id = TransferIds.queueTaskId(reference);
     if (id == null) return;
-    switch (status) {
+    final code = _httpStatusCode(update, exception);
+    // A request the server answered with a status the app accepts.
+    final accepted =
+        transfer is DataTask &&
+        status == TaskStatus.failed &&
+        code != null &&
+        _requestSuccessCodes.contains(code);
+    switch (accepted ? TaskStatus.complete : status) {
       case TaskStatus.complete:
         final complete = onComplete;
-        if (complete != null) {
+        final respond = transfer is DataTask ? _onResponse : null;
+        if (complete != null || respond != null) {
           final current = await queue.getTask(id);
           // Only for the attempt that is still waiting for this transfer.
           // Its reference may not be stored yet if the transfer ended
@@ -336,16 +426,21 @@ final class QueueTransfers {
               current.attempts != TransferIds.attempt(reference)) {
             return;
           }
+          final result = TransferResult(
+            queueTaskId: id,
+            transfer: transfer,
+            httpStatusCode: code,
+            responseBody: update?.responseBody,
+            responseHeaders: update?.responseHeaders,
+          );
           try {
-            await complete(
-              TransferResult(
-                queueTaskId: id,
-                transfer: transfer,
-                httpStatusCode: update?.responseStatusCode,
-                responseBody: update?.responseBody,
-                responseHeaders: update?.responseHeaders,
-              ),
-            );
+            if (complete != null) await complete(result);
+            if (respond != null && current.type == BackgroundRequest.taskType) {
+              await respond(
+                BackgroundRequest.fromJson(current.payload),
+                result,
+              );
+            }
           } on Object catch (error, stackTrace) {
             await queue.failHandOff(
               id,
@@ -370,7 +465,7 @@ final class QueueTransfers {
           TransferException(
             reference,
             status,
-            httpStatusCode: _httpStatusCode(update, exception),
+            httpStatusCode: code,
             cause: exception,
             responseBody: update?.responseBody,
           ),

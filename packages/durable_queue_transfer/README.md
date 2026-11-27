@@ -1,6 +1,6 @@
 # durable_queue_transfer
 
-Uploads and downloads for [`durable_queue`](https://pub.dev/packages/durable_queue) that keep going after the user minimises or closes the app.
+Uploads, downloads, and plain HTTP requests for [`durable_queue`](https://pub.dev/packages/durable_queue) that keep going after the user minimises or closes the app.
 
 ![Demo on an Android phone: photos are queued, the app goes to the home screen, the uploads still reach the server, and the server is told about each one when the app is opened again](https://raw.githubusercontent.com/boffincoders/durable_queue/main/docs/media/durable_queue_demo_android.gif)
 
@@ -22,7 +22,7 @@ dependencies:
   background_downloader: ^9.6.4
   durable_queue: ^1.1.1
   durable_queue_sqlite: ^1.2.0
-  durable_queue_transfer: ^1.0.1
+  durable_queue_transfer: ^1.1.0
 ```
 
 Requires Flutter 3.47 or later (as `background_downloader` does). Follow `background_downloader`'s [setup](https://pub.dev/packages/background_downloader#initial-setup): on Android, Kotlin 2.1.0 or later; iOS 14 or later, HTTPS by default. Use storage that survives restarts, such as `durable_queue_sqlite`.
@@ -101,9 +101,45 @@ Call it once per launch, in the app's main isolate, before or after `queue.start
 
 So "it will be done" holds as long as the app is eventually opened again and the retry budget is not used up. A force-quit can delay a transfer until the next launch; it does not lose the task.
 
+## HTTP requests the system sends
+
+An ordinary API call, such as `POST /messages`, normally waits in the queue until the app runs again. With `registerRequests`, the operating system sends it, like an upload, so it goes out even after the user closes the app:
+
+```dart
+final transfers = QueueTransfers(queue);
+transfers.registerRequests(
+  // Added when each attempt starts; not stored in the queue.
+  headersAtSend: (request) async => {'Authorization': 'Bearer ${await token()}'},
+  onResponse: (request, result) => saveReply(result.responseBody),
+  successStatusCodes: {409}, // the server already has this idempotency key
+);
+await transfers.attach();
+
+await queue.enqueue(
+  BackgroundRequest(
+    method: 'POST',
+    url: 'https://api.example.com/messages',
+    body: {'text': 'hi'},
+  ),
+  idempotencyKey: messageId, // sent as Idempotency-Key, the same on every attempt
+  retryPolicy: RetryPolicy.exponential(
+    maxAttempts: 5,
+    initialDelay: const Duration(seconds: 10),
+  ),
+);
+```
+
+Each attempt is a `background_downloader` `DataTask`: on iOS a background `URLSession` task, on Android a WorkManager job. The queue keeps the rest: retries (by default 408, 425, 429, 5xx, and connection failures; other 4xx fail at once), dependencies, deduplication, gates, and rate limits.
+
+* Bodies are JSON (a map or a list) or text (a string). Send files with `start` and an `UploadTask`.
+* `requiresWiFi: true` makes a request wait for Wi-Fi or another unmetered connection.
+* `onResponse` gets the status code, body, and headers. For a request that finished while the app was not running, only the status is known at the next launch; the body and headers are null.
+* Keep credentials out of `BackgroundRequest.headers`, which are stored in the queue. `headersAtSend` adds them per attempt; `background_downloader` keeps them with the request until it ends.
+* On iOS, a user who force-quits the app from the app switcher cancels its background transfers, requests included. They are sent again from the queue on the next launch.
+
 ## Progress
 
-Transfer progress is passed to the queue: read it with `queue.progressOf(taskId)` or `queue.progress`, or show it with `durable_queue_flutter`'s `QueueProgressBuilder`. `start` asks `background_downloader` for progress updates as well as status updates, unless the transfer asked for none (`updates: Updates.none`). Pass `reportProgress: false` to `QueueTransfers` to turn this off.
+Transfer progress is passed to the queue: read it with `queue.progressOf(taskId)` or `queue.progress`, or show it with `durable_queue_flutter`'s `QueueProgressBuilder`. `start` asks `background_downloader` for progress updates as well as status updates, unless the transfer asked for none (`updates: Updates.none`) or is a `DataTask`, which reports status only. Pass `reportProgress: false` to `QueueTransfers` to turn this off.
 
 ## Pause and resume
 

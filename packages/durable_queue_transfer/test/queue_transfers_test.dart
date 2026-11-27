@@ -737,6 +737,218 @@ void main() {
       expect(holds, hasLength(1));
     });
   });
+
+  group('background requests', () {
+    late List<(BackgroundRequest, TransferResult)> responses;
+    FutureOr<void> Function()? respond;
+
+    setUp(() {
+      responses = [];
+      respond = null;
+    });
+
+    void register({Set<int> successStatusCodes = const {}}) {
+      transfers.registerRequests(
+        headersAtSend: (request) => {'Authorization': 'Bearer fresh'},
+        successStatusCodes: successStatusCodes,
+        onResponse: (request, result) {
+          responses.add((request, result));
+          return respond?.call();
+        },
+      );
+    }
+
+    Future<String> enqueueRequest({int maxAttempts = 3}) => queue.enqueue(
+      BackgroundRequest(
+        method: 'post',
+        url: 'https://api.example.com/messages?draft=1',
+        headers: {'X-App': 'demo'},
+        query: {'to': 'ana & bo'},
+        body: {'text': 'hi'},
+        requiresWiFi: true,
+      ),
+      idempotencyKey: 'message-7',
+      retryPolicy: dq.RetryPolicy.fixed(
+        maxAttempts: maxAttempts,
+        delay: Duration.zero,
+      ),
+    );
+
+    test('a request is sent as a DataTask with its headers and body', () async {
+      register();
+      await transfers.attach();
+      final id = await enqueueRequest();
+      await startAndWaitForTransfer();
+
+      final sent = files.enqueued.single;
+      expect(sent, isA<DataTask>());
+      expect(sent.taskId, 'dq-1-$id');
+      expect(sent.httpRequestMethod, 'POST');
+      expect(Uri.parse(sent.url).queryParameters, {
+        'draft': '1',
+        'to': 'ana & bo',
+      });
+      expect(sent.headers['X-App'], 'demo');
+      expect(sent.headers['Idempotency-Key'], 'message-7');
+      expect(sent.headers['Authorization'], 'Bearer fresh');
+      expect(sent.headers['Content-Type'], 'application/json');
+      expect(sent.post, '{"text":"hi"}');
+      expect(sent.requiresWiFi, isTrue);
+      // A DataTask reports status only: asking for progress would fail.
+      expect(sent.updates, Updates.status);
+      expect((await stored(id)).isHandedOff, isTrue);
+      // The token is not stored with the queue task.
+      expect('${(await stored(id)).payload}', isNot(contains('fresh')));
+    });
+
+    test('a response completes the task and reaches onResponse', () async {
+      register();
+      await transfers.attach();
+      final id = await enqueueRequest();
+      await startAndWaitForTransfer();
+      files.emit(
+        TaskStatusUpdate(
+          files.enqueued.single,
+          TaskStatus.complete,
+          null,
+          '{"id": 9}',
+          {'content-type': 'application/json'},
+          201,
+        ),
+      );
+      await until(() => responses.isNotEmpty);
+      await pumpEventQueue();
+      final (request, result) = responses.single;
+      expect(request.body, {'text': 'hi'});
+      expect(result.httpStatusCode, 201);
+      expect(result.responseBody, '{"id": 9}');
+      expect(results, hasLength(1), reason: 'onComplete runs too');
+      expect((await stored(id)).status, dq.TaskStatus.completed);
+    });
+
+    test('an accepted error status completes the task', () async {
+      register(successStatusCodes: {409});
+      await transfers.attach();
+      final id = await enqueueRequest();
+      await startAndWaitForTransfer();
+      files.emit(
+        TaskStatusUpdate(
+          files.enqueued.single,
+          TaskStatus.failed,
+          TaskHttpException('Conflict', 409),
+          'already sent',
+        ),
+      );
+      await until(() => responses.isNotEmpty);
+      await pumpEventQueue();
+      expect(responses.single.$2.httpStatusCode, 409);
+      expect(responses.single.$2.responseBody, 'already sent');
+      expect((await stored(id)).status, dq.TaskStatus.completed);
+    });
+
+    test(
+      'server errors retry with a new request; client errors fail',
+      () async {
+        register();
+        await transfers.attach();
+        final id = await enqueueRequest();
+        await startAndWaitForTransfer();
+        files.emit(
+          TaskStatusUpdate(
+            files.enqueued.single,
+            TaskStatus.failed,
+            TaskHttpException('Unavailable', 503),
+          ),
+        );
+        await startAndWaitForTransfer(2);
+        expect(files.enqueued.last.taskId, 'dq-2-$id');
+        expect(files.enqueued.last.headers['Idempotency-Key'], 'message-7');
+        files.emit(
+          TaskStatusUpdate(
+            files.enqueued.last,
+            TaskStatus.failed,
+            TaskHttpException('Bad request', 400),
+          ),
+        );
+        await pumpEventQueue();
+        expect((await stored(id)).status, dq.TaskStatus.failed);
+        expect(responses, isEmpty);
+      },
+    );
+
+    test('an onResponse error fails the attempt', () async {
+      register();
+      respond = () => throw StateError('could not save the reply');
+      await transfers.attach();
+      final id = await enqueueRequest(maxAttempts: 1);
+      await startAndWaitForTransfer();
+      files.emit(TaskStatusUpdate(files.enqueued.single, TaskStatus.complete));
+      await pumpEventQueue();
+      await pumpEventQueue();
+      final task = await stored(id);
+      expect(task.status, dq.TaskStatus.failed);
+      expect(task.lastFailure!.error, contains('could not save the reply'));
+    });
+
+    test(
+      'a request that finished while the app was closed is applied',
+      () async {
+        register();
+        final id = await enqueueRequest();
+        await queue.drain();
+        expect((await stored(id)).isHandedOff, isTrue);
+        files.fakeDatabase.records['dq-1-$id'] = TaskRecord(
+          files.enqueued.single,
+          TaskStatus.complete,
+          1,
+          0,
+        );
+        await transfers.reconcile();
+        expect((await stored(id)).status, dq.TaskStatus.completed);
+        expect(responses.single.$2.responseBody, isNull);
+      },
+    );
+
+    test('a DataTask can also be started directly', () async {
+      await transfers.attach();
+      queue.register<FileDownload>(
+        type: 'download',
+        decoder: FileDownload.fromJson,
+        handler: (task, context) => transfers.start(
+          context,
+          DataTask(url: 'https://example.com/${task.name}'),
+        ),
+      );
+      await queue.enqueue(FileDownload('ping'));
+      await startAndWaitForTransfer();
+      expect(files.enqueued.single.updates, Updates.status);
+    });
+
+    test('requests are validated and stored as JSON', () {
+      expect(
+        () => BackgroundRequest(method: ' ', url: 'https://x.dev'),
+        throwsArgumentError,
+      );
+      expect(
+        () => BackgroundRequest(method: 'GET', url: '/relative'),
+        throwsArgumentError,
+      );
+      expect(
+        () => BackgroundRequest(method: 'POST', url: 'https://x.dev', body: 3),
+        throwsArgumentError,
+      );
+      final text = BackgroundRequest(
+        method: 'put',
+        url: 'https://x.dev/a',
+        body: 'plain',
+      );
+      final copy = BackgroundRequest.fromJson(text.toJson());
+      expect(copy.toJson(), text.toJson());
+      final task = copy.toDataTask();
+      expect(task.post, 'plain');
+      expect(task.headers['Content-Type'], startsWith('text/plain'));
+    });
+  });
 }
 
 final class _Quick extends dq.DurableTask {
